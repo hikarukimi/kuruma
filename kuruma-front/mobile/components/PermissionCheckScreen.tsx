@@ -1,12 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
-import { Camera } from 'expo-camera';
-import * as Location from 'expo-location';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Pressable, Text, View } from 'react-native';
 
 type PermissionKey = 'camera' | 'microphone' | 'location';
 
-type PermissionState = Record<PermissionKey, boolean>;
+export type PermissionState = Record<PermissionKey, boolean>;
 
 const permissionLabels: Record<PermissionKey, string> = {
   camera: '摄像头权限',
@@ -14,57 +11,22 @@ const permissionLabels: Record<PermissionKey, string> = {
   location: '定位权限',
 };
 
-const initialPermissionState: PermissionState = {
-  camera: false,
-  microphone: false,
-  location: false,
+type PermissionCheckScreenProps = {
+  isRequesting: boolean;
+  onRequestPermissions: () => void;
+  permissions: PermissionState;
 };
 
-export function PermissionCheckScreen() {
-  const [permissions, setPermissions] = useState<PermissionState>(initialPermissionState);
-  const [isRequesting, setIsRequesting] = useState(false);
-
+export function PermissionCheckScreen({
+  isRequesting,
+  onRequestPermissions,
+  permissions,
+}: PermissionCheckScreenProps) {
   const permissionRows = Object.entries(permissionLabels).map(([key, label]) => ({
     key: key as PermissionKey,
     label,
     granted: permissions[key as PermissionKey],
   }));
-
-  const checkPermissions = useCallback(async () => {
-    const [camera, microphone, location] = await Promise.all([
-      Camera.getCameraPermissionsAsync(),
-      Camera.getMicrophonePermissionsAsync(),
-      Location.getForegroundPermissionsAsync(),
-    ]);
-
-    setPermissions({
-      camera: camera.granted,
-      microphone: microphone.granted,
-      location: location.granted,
-    });
-  }, []);
-
-  const requestPermissions = useCallback(async () => {
-    setIsRequesting(true);
-
-    try {
-      const camera = await Camera.requestCameraPermissionsAsync();
-      const microphone = await Camera.requestMicrophonePermissionsAsync();
-      const location = await Location.requestForegroundPermissionsAsync();
-
-      setPermissions({
-        camera: camera.granted,
-        microphone: microphone.granted,
-        location: location.granted,
-      });
-    } finally {
-      setIsRequesting(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void checkPermissions();
-  }, [checkPermissions]);
 
   return (
     <SafeAreaView className="flex-1 bg-slate-50">
@@ -99,7 +61,7 @@ export function PermissionCheckScreen() {
             isRequesting ? 'bg-blue-400' : 'bg-blue-600'
           }`}
           disabled={isRequesting}
-          onPress={requestPermissions}>
+          onPress={onRequestPermissions}>
           <Text className="text-[17px] font-bold text-white">
             {isRequesting ? '请求授权中...' : '授权并继续'}
           </Text>
