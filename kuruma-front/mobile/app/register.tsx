@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { router } from 'expo-router';
 import {
   ActivityIndicator,
+  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -49,26 +50,21 @@ function getValidationMessage(form: RegisterForm) {
 export default function RegisterRoute() {
   const [form, setForm] = useState<RegisterForm>(initialForm);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [message, setMessage] = useState('');
-  const [isSuccess, setIsSuccess] = useState(false);
 
   const validationMessage = useMemo(() => getValidationMessage(form), [form]);
   const canSubmit = !validationMessage && !isSubmitting;
 
   const updateField = (field: keyof RegisterForm) => (value: string) => {
     setForm((current) => ({ ...current, [field]: value }));
-    setMessage('');
-    setIsSuccess(false);
   };
 
   const submitRegister = async () => {
     if (!canSubmit) {
-      setMessage(validationMessage);
+      Alert.alert('注册失败', validationMessage);
       return;
     }
 
     setIsSubmitting(true);
-    setMessage('');
 
     try {
       await registerUser({
@@ -77,11 +73,10 @@ export default function RegisterRoute() {
         password: form.password,
         displayName: form.displayName.trim(),
       });
-      setIsSuccess(true);
-      setMessage('注册成功，请返回登录');
+      Alert.alert('注册成功', '请返回登录');
       setForm(initialForm);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '注册失败，请稍后重试');
+      Alert.alert('注册失败', error instanceof Error ? error.message : '注册失败，请稍后重试');
     } finally {
       setIsSubmitting(false);
     }
@@ -165,13 +160,6 @@ export default function RegisterRoute() {
               />
             </View>
           </View>
-
-          {message ? (
-            <Text
-              className={`mt-5 text-sm font-medium ${isSuccess ? 'text-green-700' : 'text-red-600'}`}>
-              {message}
-            </Text>
-          ) : null}
 
           <Pressable
             className={`mt-7 h-[52px] flex-row items-center justify-center rounded-lg ${

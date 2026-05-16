@@ -16,6 +16,7 @@ func NewRouter(cfg config.Config, authHandler *handler.AuthHandler) *gin.Engine 
 
 	api := router.Group("/api/v1")
 	api.POST("/auth/register", authHandler.Register)
+	api.POST("/auth/login", authHandler.Login)
 
 	return router
 }

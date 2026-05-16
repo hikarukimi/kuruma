@@ -9,6 +9,10 @@ database:
   driver: postgres
   dsn: postgres://postgres:postgres@localhost:5432/kuruma?sslmode=disable
 
+auth:
+  jwt_secret: change-me
+  jwt_expires_hours: 24
+
 redis:
   addr: localhost:6379
 

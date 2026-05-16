@@ -23,7 +23,7 @@ func main() {
 	}
 
 	userRepository := repository.NewUserRepository(db)
-	authService := service.NewAuthService(userRepository)
+	authService := service.NewAuthService(userRepository, cfg.JWTSecret, cfg.JWTExpiresHours)
 	authHandler := handler.NewAuthHandler(authService)
 
 	router := server.NewRouter(cfg, authHandler)

@@ -13,11 +13,13 @@ const (
 )
 
 type Config struct {
-	AppName  string
-	Env      string
-	Port     string
-	DBDriver string
-	DBDSN    string
+	AppName         string
+	Env             string
+	Port            string
+	DBDriver        string
+	DBDSN           string
+	JWTSecret       string
+	JWTExpiresHours int
 }
 
 func Load() Config {
@@ -35,11 +37,13 @@ func (c Config) HTTPAddress() string {
 
 func loadFile(path string) (Config, error) {
 	cfg := Config{
-		AppName:  "",
-		Env:      "",
-		Port:     "",
-		DBDriver: "",
-		DBDSN:    "",
+		AppName:         "",
+		Env:             "",
+		Port:            "",
+		DBDriver:        "",
+		DBDSN:           "",
+		JWTSecret:       "kuruma-dev-secret",
+		JWTExpiresHours: 24,
 	}
 
 	data, err := os.ReadFile(filepath.Clean(path))
@@ -59,6 +63,10 @@ func loadFile(path string) (Config, error) {
 			Driver string `yaml:"driver"`
 			DSN    string `yaml:"dsn"`
 		} `yaml:"database"`
+		Auth struct {
+			JWTSecret       string `yaml:"jwt_secret"`
+			JWTExpiresHours int    `yaml:"jwt_expires_hours"`
+		} `yaml:"auth"`
 	}
 
 	if err := yaml.Unmarshal(data, &fileConfig); err != nil {
@@ -79,6 +87,12 @@ func loadFile(path string) (Config, error) {
 	}
 	if fileConfig.Database.DSN != "" {
 		cfg.DBDSN = fileConfig.Database.DSN
+	}
+	if fileConfig.Auth.JWTSecret != "" {
+		cfg.JWTSecret = fileConfig.Auth.JWTSecret
+	}
+	if fileConfig.Auth.JWTExpiresHours > 0 {
+		cfg.JWTExpiresHours = fileConfig.Auth.JWTExpiresHours
 	}
 
 	return cfg, nil
