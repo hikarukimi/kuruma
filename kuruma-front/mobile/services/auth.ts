@@ -1,3 +1,6 @@
+import * as FileSystem from 'expo-file-system/legacy';
+import { Platform } from 'react-native';
+
 import { defaultApiBaseUrl } from 'services';
 
 type RegisterPayload = {
@@ -32,8 +35,52 @@ type LoginResponse = {
 };
 
 let authToken = '';
+const authTokenStorageKey = 'kuruma.authToken';
+const authTokenFileUri = FileSystem.documentDirectory
+  ? `${FileSystem.documentDirectory}kuruma-auth-token.txt`
+  : '';
 
 export function getAuthToken() {
+  return authToken;
+}
+
+async function readStoredToken() {
+  try {
+    if (Platform.OS === 'web' && typeof localStorage !== 'undefined') {
+      return localStorage.getItem(authTokenStorageKey) || '';
+    }
+
+    if (!authTokenFileUri) {
+      return '';
+    }
+
+    return (await FileSystem.readAsStringAsync(authTokenFileUri)).trim();
+  } catch {
+    return '';
+  }
+}
+
+async function storeToken(token: string) {
+  authToken = token;
+
+  if (Platform.OS === 'web' && typeof localStorage !== 'undefined') {
+    localStorage.setItem(authTokenStorageKey, token);
+    return;
+  }
+
+  if (!authTokenFileUri) {
+    return;
+  }
+
+  await FileSystem.writeAsStringAsync(authTokenFileUri, token);
+}
+
+export async function loadAuthToken() {
+  if (authToken) {
+    return authToken;
+  }
+
+  authToken = await readStoredToken();
   return authToken;
 }
 
@@ -82,7 +129,7 @@ export async function loginUser(payload: LoginPayload): Promise<LoginResponse> {
     throw new Error('登录响应格式不正确');
   }
 
-  authToken = data.token;
+  await storeToken(data.token);
 
   return {
     user: data.user,

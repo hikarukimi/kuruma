@@ -4,6 +4,8 @@ import * as Location from 'expo-location';
 import { router } from 'expo-router';
 import { ActivityIndicator, Text, View } from 'react-native';
 
+import { loadAuthToken } from 'services/auth';
+
 type PermissionState = {
   camera: boolean;
   microphone: boolean;
@@ -15,27 +17,33 @@ function hasAllPermissions(permissions: PermissionState) {
 }
 
 export default function IndexRoute() {
-  const applyPermissions = useCallback((nextPermissions: PermissionState) => {
-    router.replace(hasAllPermissions(nextPermissions) ? '/login' : '/premission');
+  const applyStartupState = useCallback((nextPermissions: PermissionState) => {
+    router.replace(hasAllPermissions(nextPermissions) ? '/home' : '/premission');
   }, []);
 
-  const checkPermissions = useCallback(async () => {
+  const checkStartupState = useCallback(async () => {
+    const token = await loadAuthToken();
+    if (!token) {
+      router.replace('/login');
+      return;
+    }
+
     const [camera, microphone, location] = await Promise.all([
       Camera.getCameraPermissionsAsync(),
       Camera.getMicrophonePermissionsAsync(),
       Location.getForegroundPermissionsAsync(),
     ]);
 
-    applyPermissions({
+    applyStartupState({
       camera: camera.granted,
       microphone: microphone.granted,
       location: location.granted,
     });
-  }, [applyPermissions]);
+  }, [applyStartupState]);
 
   useEffect(() => {
-    void checkPermissions();
-  }, [checkPermissions]);
+    void checkStartupState();
+  }, [checkStartupState]);
 
   return (
     <View className="flex-1 items-center justify-center bg-slate-50 px-6">

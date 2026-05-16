@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link } from 'expo-router';
+import { Link, router } from 'expo-router';
 import {
   ActivityIndicator,
   Alert,
@@ -41,7 +41,7 @@ export default function LoginRoute() {
         phone: phone.trim(),
         password,
       });
-      Alert.alert('登录成功', '已成功登录');
+      router.replace('/home');
     } catch (error) {
       Alert.alert('登录失败', error instanceof Error ? error.message : '登录失败，请稍后重试');
     } finally {

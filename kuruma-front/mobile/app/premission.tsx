@@ -5,6 +5,8 @@ import { router } from 'expo-router';
 import { Pressable, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { loadAuthToken } from 'services/auth';
+
 type PermissionKey = 'camera' | 'microphone' | 'location';
 type PermissionState = Record<PermissionKey, boolean>;
 
@@ -28,10 +30,11 @@ export default function PremissionRoute() {
   const [permissions, setPermissions] = useState<PermissionState>(initialPermissions);
   const [isRequesting, setIsRequesting] = useState(false);
 
-  const applyPermissions = useCallback((nextPermissions: PermissionState) => {
+  const applyPermissions = useCallback(async (nextPermissions: PermissionState) => {
     setPermissions(nextPermissions);
     if (hasAllPermissions(nextPermissions)) {
-      router.replace('/login');
+      const token = await loadAuthToken();
+      router.replace(token ? '/home' : '/login');
     }
   }, []);
 
@@ -42,7 +45,7 @@ export default function PremissionRoute() {
       Location.getForegroundPermissionsAsync(),
     ]);
 
-    applyPermissions({
+    void applyPermissions({
       camera: camera.granted,
       microphone: microphone.granted,
       location: location.granted,
@@ -56,7 +59,7 @@ export default function PremissionRoute() {
       const microphone = await Camera.requestMicrophonePermissionsAsync();
       const location = await Location.requestForegroundPermissionsAsync();
 
-      applyPermissions({
+      await applyPermissions({
         camera: camera.granted,
         microphone: microphone.granted,
         location: location.granted,
