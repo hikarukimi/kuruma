@@ -12,7 +12,21 @@
       "tsconfigPaths": true
     },
 
-    "plugins": [],
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "允许 Kuruma 使用摄像头采集事故现场画面。",
+          "microphonePermission": "允许 Kuruma 使用麦克风采集事故现场声音。"
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "允许 Kuruma 使用当前位置记录事故地点。"
+        }
+      ]
+    ],
 
     "orientation": "portrait",
     "icon": "./assets/icon.png",

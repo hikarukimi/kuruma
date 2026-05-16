@@ -1,124 +1,114 @@
+import { useCallback, useEffect, useState } from 'react';
+import { Camera } from 'expo-camera';
+import * as Location from 'expo-location';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 
-const permissions = [
-  { label: '摄像头权限', granted: true },
-  { label: '麦克风权限', granted: true },
-  { label: '定位权限', granted: false },
-];
+type PermissionKey = 'camera' | 'microphone' | 'location';
+
+type PermissionState = Record<PermissionKey, boolean>;
+
+const permissionLabels: Record<PermissionKey, string> = {
+  camera: '摄像头权限',
+  microphone: '麦克风权限',
+  location: '定位权限',
+};
+
+const initialPermissionState: PermissionState = {
+  camera: false,
+  microphone: false,
+  location: false,
+};
 
 export function PermissionCheckScreen() {
-  return (
-    <SafeAreaView style={styles.screen}>
-      <View style={styles.content}>
-        <Text style={styles.title}>使用前检查</Text>
+  const [permissions, setPermissions] = useState<PermissionState>(initialPermissionState);
+  const [isRequesting, setIsRequesting] = useState(false);
 
-        <View style={styles.list}>
-          {permissions.map((permission) => (
-            <View key={permission.label} style={styles.permissionRow}>
+  const permissionRows = Object.entries(permissionLabels).map(([key, label]) => ({
+    key: key as PermissionKey,
+    label,
+    granted: permissions[key as PermissionKey],
+  }));
+
+  const checkPermissions = useCallback(async () => {
+    const [camera, microphone, location] = await Promise.all([
+      Camera.getCameraPermissionsAsync(),
+      Camera.getMicrophonePermissionsAsync(),
+      Location.getForegroundPermissionsAsync(),
+    ]);
+
+    setPermissions({
+      camera: camera.granted,
+      microphone: microphone.granted,
+      location: location.granted,
+    });
+  }, []);
+
+  const requestPermissions = useCallback(async () => {
+    setIsRequesting(true);
+
+    try {
+      const camera = await Camera.requestCameraPermissionsAsync();
+      const microphone = await Camera.requestMicrophonePermissionsAsync();
+      const location = await Location.requestForegroundPermissionsAsync();
+
+      setPermissions({
+        camera: camera.granted,
+        microphone: microphone.granted,
+        location: location.granted,
+      });
+    } finally {
+      setIsRequesting(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void checkPermissions();
+  }, [checkPermissions]);
+
+  return (
+    <SafeAreaView className="flex-1 bg-slate-50">
+      <View className="flex-1 px-6 pt-10">
+        <Text className="mb-8 text-[28px] font-bold text-gray-900">使用前检查</Text>
+
+        <View className="mb-8 gap-[18px]">
+          {permissionRows.map((permission) => (
+            <View key={permission.key} className="flex-row items-center">
               <Text
-                style={[styles.checkMark, permission.granted ? styles.checked : styles.unchecked]}>
+                className={`mr-3 h-7 w-7 overflow-hidden rounded-md border text-center text-base leading-[26px] ${
+                  permission.granted
+                    ? 'border-green-600 bg-green-100 text-green-700'
+                    : 'border-slate-300 bg-white text-white'
+                }`}>
                 {permission.granted ? '✓' : ' '}
               </Text>
-              <Text style={styles.permissionText}>{permission.label}</Text>
+              <Text className="text-lg text-gray-800">{permission.label}</Text>
+              <Text className="ml-auto text-sm text-slate-500">
+                {permission.granted ? '已授权' : '未授权'}
+              </Text>
             </View>
           ))}
         </View>
 
-        <Text style={styles.description}>事故处理需要采集现场画面、声音和定位信息。</Text>
+        <Text className="mb-9 text-base leading-6 text-slate-600">
+          事故处理需要采集现场画面、声音和定位信息。
+        </Text>
 
-        <View style={styles.primaryButton}>
-          <Text style={styles.primaryButtonText}>授权并继续</Text>
-        </View>
+        <Pressable
+          className={`mb-3.5 h-[52px] items-center justify-center rounded-lg ${
+            isRequesting ? 'bg-blue-400' : 'bg-blue-600'
+          }`}
+          disabled={isRequesting}
+          onPress={requestPermissions}>
+          <Text className="text-[17px] font-bold text-white">
+            {isRequesting ? '请求授权中...' : '授权并继续'}
+          </Text>
+        </Pressable>
 
-        <View style={styles.secondaryButton}>
-          <Text style={styles.secondaryButtonText}>稍后再说</Text>
-        </View>
+        <Pressable className="h-[52px] items-center justify-center rounded-lg border border-slate-300 bg-white">
+          <Text className="text-[17px] font-semibold text-slate-700">稍后再说</Text>
+        </Pressable>
       </View>
     </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: '#f8fafc',
-  },
-  content: {
-    flex: 1,
-    paddingHorizontal: 24,
-    paddingTop: 40,
-  },
-  title: {
-    color: '#111827',
-    fontSize: 28,
-    fontWeight: '700',
-    marginBottom: 32,
-  },
-  list: {
-    gap: 18,
-    marginBottom: 32,
-  },
-  permissionRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-  },
-  checkMark: {
-    borderRadius: 6,
-    borderWidth: 1,
-    fontSize: 16,
-    height: 28,
-    lineHeight: 26,
-    marginRight: 12,
-    overflow: 'hidden',
-    textAlign: 'center',
-    width: 28,
-  },
-  checked: {
-    backgroundColor: '#dcfce7',
-    borderColor: '#16a34a',
-    color: '#15803d',
-  },
-  unchecked: {
-    backgroundColor: '#ffffff',
-    borderColor: '#cbd5e1',
-    color: '#ffffff',
-  },
-  permissionText: {
-    color: '#1f2937',
-    fontSize: 18,
-  },
-  description: {
-    color: '#475569',
-    fontSize: 16,
-    lineHeight: 24,
-    marginBottom: 36,
-  },
-  primaryButton: {
-    alignItems: 'center',
-    backgroundColor: '#2563eb',
-    borderRadius: 8,
-    height: 52,
-    justifyContent: 'center',
-    marginBottom: 14,
-  },
-  primaryButtonText: {
-    color: '#ffffff',
-    fontSize: 17,
-    fontWeight: '700',
-  },
-  secondaryButton: {
-    alignItems: 'center',
-    backgroundColor: '#ffffff',
-    borderColor: '#cbd5e1',
-    borderRadius: 8,
-    borderWidth: 1,
-    height: 52,
-    justifyContent: 'center',
-  },
-  secondaryButtonText: {
-    color: '#334155',
-    fontSize: 17,
-    fontWeight: '600',
-  },
-});
