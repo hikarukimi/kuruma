@@ -1,0 +1,16 @@
+app:
+  name: kuruma-back
+  env: development
+
+http:
+  port: 8080
+
+database:
+  driver: postgres
+  dsn: postgres://postgres:postgres@localhost:5432/kuruma?sslmode=disable
+
+redis:
+  addr: localhost:6379
+
+storage:
+  local_path: ./storage

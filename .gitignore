@@ -49,3 +49,9 @@ npm-debug.*
 # OS and merge artifacts
 .DS_Store
 *.orig.*
+
+# cache
+.gocache
+
+#ai
+.agents

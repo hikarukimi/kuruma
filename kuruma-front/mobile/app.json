@@ -3,15 +3,12 @@
     "name": "mobile",
     "slug": "mobile",
     "version": "1.0.0",
-
     "web": {
       "favicon": "./assets/favicon.png"
     },
-
     "experiments": {
       "tsconfigPaths": true
     },
-
     "plugins": [
       [
         "expo-camera",
@@ -25,14 +22,12 @@
         {
           "locationWhenInUsePermission": "允许 Kuruma 使用当前位置记录事故地点。"
         }
-      ]
+      ],
+      "expo-router"
     ],
-
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-
     "userInterfaceStyle": "light",
-
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",

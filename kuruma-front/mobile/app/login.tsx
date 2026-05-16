@@ -1,11 +1,11 @@
 import { useState } from 'react';
+import { Link } from 'expo-router';
 import { KeyboardAvoidingView, Platform, Pressable, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-export function LoginScreen() {
+export default function LoginRoute() {
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
-
   const canSubmit = phone.trim().length > 0 && password.length > 0;
 
   return (
@@ -15,7 +15,10 @@ export function LoginScreen() {
         className="flex-1">
         <View className="flex-1 px-6 pt-12">
           <View className="mb-10">
-            登录后继续处理事故现场记录和材料提交
+            <Text className="text-[28px] font-bold text-gray-900">登录</Text>
+            <Text className="mt-3 text-base leading-6 text-slate-600">
+              登录后继续处理事故现场记录和材料提交。
+            </Text>
           </View>
 
           <View className="gap-4">
@@ -56,6 +59,12 @@ export function LoginScreen() {
               登录
             </Text>
           </Pressable>
+
+          <Link href="/register" asChild>
+            <Pressable className="mt-3 h-[52px] items-center justify-center rounded-lg border border-slate-300 bg-white">
+              <Text className="text-[17px] font-semibold text-slate-700">创建账号</Text>
+            </Pressable>
+          </Link>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
