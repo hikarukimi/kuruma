@@ -147,14 +147,201 @@ WebSocket 建议使用 `/ws`，连接时携带访问令牌。事件统一包含 
 
 ## 核心对象
 
+以下对象可作为 PostgreSQL 表结构和 GORM model 的初始设计。所有主表建议统一包含 `id`、`created_at`、`updated_at`，需要软删除的管理类数据可额外包含 `deleted_at`。
+
 ### User
+
+用户表，保存司机、警察和管理员账号。
+
+建议字段：
+
+- `id`：主键，建议使用 UUID。
+- `username`：登录名，唯一。
+- `password`：密码哈希。
+- `display_name`：展示名称。
+- `phone`：手机号，可选，建议唯一索引但允许为空。
+- `role`：用户角色，枚举值为 `driver`、`police`、`admin`。
+- `status`：账号状态，枚举值为 `active`、`disabled`。
+- `last_login_at`：最近登录时间。
+- `created_at`：创建时间。
+- `updated_at`：更新时间。
+- `deleted_at`：软删除时间，可选。
+
+关系：
+
+- 一个司机用户可以创建多个 `AccidentSession`，对应 `accident_sessions.driver_id`。
+- 一个警察用户可以处理多个 `AccidentSession`，对应 `accident_sessions.police_id`。
+- 一个用户可以触发多条 `AuditLog`，对应 `audit_logs.actor_user_id`。
 
 ### AccidentSession
 
+事故会话表，保存一次司机事故请求从等待到处理结束的生命周期。
+
+建议字段：
+
+- `id`：主键，建议使用 UUID。
+- `accident_no`：事故编号，唯一，用于前端展示和人工检索。
+- `driver_id`：司机用户 ID，关联 `users.id`。
+- `police_id`：接入警察用户 ID，关联 `users.id`，等待阶段可为空。
+- `status`：会话状态，枚举值为 `waiting`、`locked`、`in_call`、`ended`、`cancelled`、`timeout`、`failed`。
+- `driver_latitude`：司机上报纬度。
+- `driver_longitude`：司机上报经度。
+- `location_text`：定位文本或逆地理编码结果，可选。
+- `description`：司机填写的事故描述，可选。
+- `priority`：队列优先级，默认 `normal`，可扩展 `low`、`high`。
+- `accepted_at`：警察接入时间。
+- `started_at`：通话开始时间。
+- `ended_at`：会话结束时间。
+- `end_reason`：结束原因，例如司机取消、警察结束、超时、异常断开。
+- `created_at`：创建时间。
+- `updated_at`：更新时间。
+
+关系：
+
+- 多个事故会话属于同一个司机用户，`driver_id` 关联 `users.id`。
+- 多个事故会话可由同一个警察用户处理，`police_id` 关联 `users.id`。
+- 一个事故会话最多对应一个当前等待队列项 `QueueItem`，历史队列变化可通过审计日志记录。
+- 一个事故会话可以包含多条 `Call`，用于支持异常重连或后续多次通话尝试。
+- 一个事故会话可以包含多条 `Recording`。
+- 一个事故会话可以产生多条 `AuditLog`。
+
+索引建议：
+
+- `accident_no` 唯一索引。
+- `driver_id`、`police_id` 普通索引。
+- `status`、`created_at` 组合索引，用于队列和列表查询。
+
 ### QueueItem
+
+等待队列表，保存警察工作台待接入请求及锁定状态。当前阶段也可以只保存活跃队列项，历史变化写入 `AuditLog`。
+
+建议字段：
+
+- `id`：主键，建议使用 UUID。
+- `session_id`：事故会话 ID，外键关联 `accident_sessions.id`，建议唯一。
+- `driver_id`：司机用户 ID，冗余字段，外键关联 `users.id`，便于队列查询。
+- `locked_by`：锁定该请求的警察用户 ID，外键关联 `users.id`，未锁定时为空。
+- `status`：队列状态，枚举值为 `waiting`、`locked`、`removed`、`timeout`、`cancelled`。
+- `priority`：队列优先级。
+- `position`：队列位置，可选；也可由 `priority` 和 `created_at` 动态计算。
+- `locked_at`：锁定时间。
+- `expires_at`：等待超时时间。
+- `created_at`：入队时间。
+- `updated_at`：更新时间。
+
+关系：
+
+- 一个队列项必须属于一个 `AccidentSession`。
+- 一个队列项必须属于一个司机 `User`。
+- 一个队列项可被一个警察 `User` 锁定。
+- 当队列项状态从 `waiting` 变为 `locked` 时，应同步更新 `AccidentSession.status` 和 `AccidentSession.police_id`。
+
+索引建议：
+
+- `session_id` 唯一索引，避免同一会话重复入队。
+- `status`、`priority`、`created_at` 组合索引，用于警察端待处理列表。
+- `locked_by` 普通索引，用于查询警察当前锁定的请求。
 
 ### Call
 
+通话表，保存一次 WebRTC 通话尝试或实际通话记录。
+
+建议字段：
+
+- `id`：主键，建议使用 UUID。
+- `session_id`：事故会话 ID，外键关联 `accident_sessions.id`。
+- `driver_id`：司机用户 ID，外键关联 `users.id`。
+- `police_id`：警察用户 ID，外键关联 `users.id`。
+- `room_id`：信令房间或通话上下文 ID，唯一。
+- `status`：通话状态，枚举值为 `created`、`signaling`、`connected`、`disconnected`、`ended`、`failed`。
+- `started_at`：通话建立时间。
+- `connected_at`：媒体连接成功时间。
+- `ended_at`：通话结束时间。
+- `disconnect_reason`：断开原因，可选。
+- `failure_reason`：失败原因，可选。
+- `created_at`：创建时间。
+- `updated_at`：更新时间。
+
+关系：
+
+- 一个通话必须属于一个 `AccidentSession`。
+- 一个通话分别关联司机 `User` 和警察 `User`。
+- 一个通话可以产生多条 `Recording`，例如分段录像或重试录像。
+- 一个通话可以产生多条 `AuditLog`，例如信令异常、连接成功和断开事件。
+
+索引建议：
+
+- `session_id`、`created_at` 组合索引，用于查询会话通话历史。
+- `room_id` 唯一索引，用于信令上下文定位。
+- `status` 普通索引，用于异常通话扫描。
+
 ### Recording
 
+录像表，保存警察端对通话录像产生的文件元数据。
+
+建议字段：
+
+- `id`：主键，建议使用 UUID。
+- `session_id`：事故会话 ID，外键关联 `accident_sessions.id`。
+- `call_id`：通话 ID，外键关联 `calls.id`，可选但建议保存。
+- `started_by`：开始录像的警察用户 ID，外键关联 `users.id`。
+- `status`：录像状态，枚举值为 `recording`、`completed`、`failed`、`deleted`。
+- `file_path`：本地录像文件路径。
+- `file_name`：录像文件名。
+- `mime_type`：文件类型，例如 `video/webm` 或 `video/mp4`。
+- `file_size_bytes`：文件大小。
+- `duration_seconds`：录像时长。
+- `started_at`：录像开始时间。
+- `ended_at`：录像结束时间。
+- `failure_reason`：录像失败原因。
+- `checksum`：文件校验值，可选。
+- `created_at`：创建时间。
+- `updated_at`：更新时间。
+
+关系：
+
+- 一个录像必须属于一个 `AccidentSession`。
+- 一个录像可属于一个具体 `Call`。
+- 一个录像由一个警察 `User` 发起。
+- 录像开始、停止、失败和删除应写入 `AuditLog`。
+
+索引建议：
+
+- `session_id`、`created_at` 组合索引，用于查询会话录像列表。
+- `call_id` 普通索引。
+- `started_by`、`created_at` 组合索引，用于警察个人录像查询。
+- `status` 普通索引，用于失败录像排查。
+
 ### AuditLog
+
+审计日志表，记录关键业务操作和状态变化，便于追踪事故处理过程。
+
+建议字段：
+
+- `id`：主键，建议使用 UUID。
+- `actor_user_id`：操作人用户 ID，外键关联 `users.id`，系统自动任务可为空。
+- `actor_role`：操作人角色快照，便于后续审计。
+- `action`：操作类型，例如 `session.created`、`session.accepted`、`call.connected`、`recording.started`。
+- `target_type`：目标对象类型，例如 `user`、`session`、`queue_item`、`call`、`recording`。
+- `target_id`：目标对象 ID。
+- `session_id`：事故会话 ID，外键关联 `accident_sessions.id`，非会话类操作可为空。
+- `call_id`：通话 ID，外键关联 `calls.id`，可选。
+- `recording_id`：录像 ID，外键关联 `recordings.id`，可选。
+- `before_state`：变更前状态快照，JSON。
+- `after_state`：变更后状态快照，JSON。
+- `ip_address`：客户端 IP。
+- `user_agent`：客户端 User-Agent。
+- `created_at`：创建时间。
+
+关系：
+
+- 一条审计日志可关联一个操作人 `User`。
+- 一条审计日志可关联一个 `AccidentSession`、`Call` 或 `Recording`。
+- `target_type` 和 `target_id` 用于表达通用目标关系，外键字段用于高频查询和强约束。
+
+索引建议：
+
+- `session_id`、`created_at` 组合索引，用于事故处理全过程回放。
+- `actor_user_id`、`created_at` 组合索引，用于用户操作追踪。
+- `target_type`、`target_id` 组合索引，用于对象审计查询。
+- `action`、`created_at` 组合索引，用于排查特定事件。
