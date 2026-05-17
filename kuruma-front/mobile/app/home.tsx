@@ -13,6 +13,8 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { connectDriverRealtime, sendDriverHeartbeat } from 'services/realtime';
+import { createSession, type AccidentSession } from 'services/sessions';
 
 type ConnectionMode = 'video' | 'audio';
 
@@ -36,13 +38,20 @@ function getStatusStyle(isReady: boolean) {
 
 export default function HomeRoute() {
   const [readiness, setReadiness] = useState<ReadinessState>(initialReadiness);
+  const [session, setSession] = useState<AccidentSession | null>(null);
   const [description, setDescription] = useState('');
   const [submittingMode, setSubmittingMode] = useState<ConnectionMode | null>(null);
   const [submitError, setSubmitError] = useState('');
+  const [realtimeError, setRealtimeError] = useState('');
 
   const isChecking = readiness.location === 'checking' || readiness.media === 'checking';
   const canStartConnection =
-    !isChecking && readiness.location === 'ready' && readiness.media === 'ready' && !submittingMode;
+    !isChecking &&
+    readiness.location === 'ready' &&
+    readiness.media === 'ready' &&
+    session?.callStatus !== 'ended' &&
+    !submittingMode;
+  const isCreatingSession = Boolean(submittingMode) && !session;
 
   const statusItems = useMemo(
     () => [
@@ -73,6 +82,32 @@ export default function HomeRoute() {
       },
     ],
     [readiness]
+  );
+
+  const sessionStatusItems = useMemo(
+    () => [
+      {
+        key: 'session',
+        label: session ? `会话 ${session.id}` : '会话未创建',
+        ready: Boolean(session),
+      },
+      {
+        key: 'signaling',
+        label: `信令${displaySignalingStatus(session?.signalingStatus)}`,
+        ready: session?.signalingStatus === 'connected',
+      },
+      {
+        key: 'recording',
+        label: `录像${session?.recordingStatus === 'recording' ? '中' : '未开始'}`,
+        ready: session?.recordingStatus === 'recording',
+      },
+      {
+        key: 'call',
+        label: `通话${session?.callStatus === 'ended' ? '已结束' : '进行中'}`,
+        ready: Boolean(session) && session?.callStatus !== 'ended',
+      },
+    ],
+    [session]
   );
 
   const checkReadiness = useCallback(async () => {
@@ -120,7 +155,7 @@ export default function HomeRoute() {
       if (!canStartConnection) {
         const message = isChecking
           ? '正在检查现场状态，请稍后再试'
-          : '请先确认定位和音视频权限可用';
+          : '请先确认定位和音视频权限可用，且当前通话未结束';
         setSubmitError(message);
         Alert.alert('无法发起连接', message);
         return;
@@ -130,24 +165,81 @@ export default function HomeRoute() {
       setSubmittingMode(mode);
 
       try {
-        await new Promise((resolve) => {
-          setTimeout(resolve, 600);
-        });
+        const activeSession =
+          session ??
+          (await createSession({
+            description,
+            locationStatus: readiness.location === 'ready' ? 'ready' : 'unavailable',
+            networkStatus: readiness.network,
+            recordingStatus: 'idle',
+            signalingStatus: 'idle',
+            callStatus: 'active',
+          }));
+        setSession(activeSession);
 
         Alert.alert(
-          mode === 'video' ? '已发起视频连接' : '已发起语音连接',
-          description.trim() ? '事故描述已记录在本地表单中' : '未填写事故描述'
+          mode === 'video' ? '已进入视频连接等待' : '已进入语音连接等待',
+          `当前会话：${activeSession.id}`
         );
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : '创建会话失败';
+        setSubmitError(message);
+        Alert.alert('无法发起连接', message);
       } finally {
         setSubmittingMode(null);
       }
     },
-    [canStartConnection, description, isChecking]
+    [canStartConnection, description, isChecking, readiness, session]
   );
 
   useEffect(() => {
     void checkReadiness();
   }, [checkReadiness]);
+
+  useEffect(() => {
+    if (!session?.id) {
+      return undefined;
+    }
+
+    let socket: WebSocket | null = null;
+    let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+    let isActive = true;
+
+    connectDriverRealtime({
+      sessionId: session.id,
+      onSessionUpdated: (nextSession) => {
+        setSession(nextSession);
+        setRealtimeError('');
+      },
+      onError: (message) => {
+        setRealtimeError(message);
+      },
+    })
+      .then((nextSocket) => {
+        if (!isActive) {
+          nextSocket.close();
+          return;
+        }
+
+        socket = nextSocket;
+        heartbeatTimer = setInterval(() => {
+          if (socket) {
+            sendDriverHeartbeat(socket);
+          }
+        }, 10000);
+      })
+      .catch((error: unknown) => {
+        setRealtimeError(error instanceof Error ? error.message : '实时连接失败');
+      });
+
+    return () => {
+      isActive = false;
+      if (heartbeatTimer) {
+        clearInterval(heartbeatTimer);
+      }
+      socket?.close();
+    };
+  }, [session?.id]);
 
   return (
     <SafeAreaView className="flex-1 bg-slate-50">
@@ -161,7 +253,7 @@ export default function HomeRoute() {
           <View className="mb-8">
             <Text className="text-[28px] font-bold text-gray-900">事故连接</Text>
             <Text className="mt-3 text-base leading-6 text-slate-600">
-              确认现场状态后发起音视频连接请求。
+              确认现场状态后加入事故会话，等待警察端处理。
             </Text>
           </View>
 
@@ -192,6 +284,26 @@ export default function HomeRoute() {
           </View>
 
           <View className="mb-7">
+            <Text className="mb-3 text-base font-bold text-gray-900">会话状态</Text>
+            <View className="gap-3 rounded-lg border border-slate-200 bg-white p-4">
+              {sessionStatusItems.map((item) => (
+                <View key={item.key} className="flex-row items-center">
+                  <Text
+                    className={`mr-3 h-6 w-6 overflow-hidden rounded-md border text-center text-sm leading-[22px] ${getStatusStyle(
+                      item.ready
+                    )}`}>
+                    {item.ready ? '✓' : '!'}
+                  </Text>
+                  <Text className="flex-1 text-base font-medium text-gray-800">{item.label}</Text>
+                  {item.key === 'session' && isCreatingSession ? (
+                    <ActivityIndicator className="ml-auto" color="#2563eb" size="small" />
+                  ) : null}
+                </View>
+              ))}
+            </View>
+          </View>
+
+          <View className="mb-7">
             <Text className="mb-3 text-base font-bold text-gray-900">事故描述</Text>
             <TextInput
               className="min-h-[112px] rounded-lg border border-slate-300 bg-white px-4 py-3 text-base leading-6 text-gray-900"
@@ -209,6 +321,12 @@ export default function HomeRoute() {
           {submitError ? (
             <Text className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
               {submitError}
+            </Text>
+          ) : null}
+
+          {realtimeError ? (
+            <Text className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+              {realtimeError}
             </Text>
           ) : null}
 
@@ -245,4 +363,14 @@ export default function HomeRoute() {
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
+}
+
+function displaySignalingStatus(status?: string) {
+  if (status === 'connected') {
+    return '已连接';
+  }
+  if (status === 'disconnected') {
+    return '已断开';
+  }
+  return '未连接';
 }

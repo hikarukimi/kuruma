@@ -1,29 +1,136 @@
-function App() {
-  const statusItems = [
-    { label: '网络', value: '良好' },
-    { label: '司机端', value: '在线' },
-    { label: '信令', value: '已连接' },
-  ]
+import { useEffect, useMemo, useState } from 'react'
 
-  const controls = [
-    { text: '静音', tone: 'bg-white text-slate-800 ring-slate-200' },
-    { text: '摄像头', tone: 'bg-white text-slate-800 ring-slate-200' },
-    { text: '开始录像', tone: 'bg-emerald-600 text-white ring-emerald-600' },
-    { text: '结束通话', tone: 'bg-rose-600 text-white ring-rose-600' },
-  ]
+import {
+  type AccidentSession,
+  connectAvailableSessionsRealtime,
+  connectSessionRealtime,
+  endCall,
+  startRecording,
+} from './sessions'
+
+function App() {
+  const [session, setSession] = useState<AccidentSession | null>(null)
+  const [availableSessions, setAvailableSessions] = useState<AccidentSession[]>([])
+  const [realtimeError, setRealtimeError] = useState('')
+  const [isUpdating, setIsUpdating] = useState(false)
+  // 临时测试逻辑：当前警察端只接入后端返回的第一个可用会话。
+  const activeSession = session ?? availableSessions[0] ?? null
+
+  useEffect(() => {
+    const socket = connectAvailableSessionsRealtime(
+      (nextSession) => {
+        setAvailableSessions((currentSessions) => {
+          if (currentSessions.some((currentSession) => currentSession.id === nextSession.id)) {
+            return currentSessions
+          }
+          return [...currentSessions, nextSession]
+        })
+        setRealtimeError('')
+      },
+      (message) => {
+        setRealtimeError(message)
+      },
+    )
+
+    return () => {
+      socket.close()
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!activeSession?.id) {
+      return
+    }
+
+    const socket = connectSessionRealtime(
+      activeSession.id,
+      (nextSession) => {
+        setSession(nextSession)
+        setAvailableSessions((currentSessions) =>
+          currentSessions.map((currentSession) =>
+            currentSession.id === nextSession.id ? nextSession : currentSession,
+          ),
+        )
+        setRealtimeError('')
+      },
+      (message) => {
+        setRealtimeError(message)
+      },
+    )
+
+    return () => {
+      socket.close()
+    }
+  }, [activeSession?.id])
+
+  const statusItems = useMemo(
+    () => [
+      { label: '网络', value: displayNetworkStatus(activeSession?.networkStatus) },
+      { label: '司机端', value: activeSession?.driverOnline ? '在线' : '离线' },
+      { label: '信令', value: displaySignalingStatus(activeSession?.signalingStatus) },
+    ],
+    [activeSession],
+  )
+
+  const isRecording = activeSession?.recordingStatus === 'recording'
+  const isCallEnded = activeSession?.callStatus === 'ended'
+
+  const handleStartRecording = async () => {
+    if (!activeSession || isUpdating) {
+      return
+    }
+
+    setIsUpdating(true)
+    try {
+      const nextSession = await startRecording(activeSession.id)
+      setSession(nextSession)
+      setRealtimeError('')
+    } catch (error) {
+      setRealtimeError(error instanceof Error ? error.message : '开始录像失败')
+    } finally {
+      setIsUpdating(false)
+    }
+  }
+
+  const handleEndCall = async () => {
+    if (!activeSession || isUpdating) {
+      return
+    }
+
+    setIsUpdating(true)
+    try {
+      const nextSession = await endCall(activeSession.id)
+      setSession(nextSession)
+      setRealtimeError('')
+    } catch (error) {
+      setRealtimeError(error instanceof Error ? error.message : '结束通话失败')
+    } finally {
+      setIsUpdating(false)
+    }
+  }
 
   return (
     <main className="min-h-screen bg-[#f4f6f8] p-4 text-slate-900 md:p-8">
       <section className="mx-auto flex min-h-[calc(100vh-2rem)] max-w-6xl flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm md:min-h-[calc(100vh-4rem)]">
         <header className="flex flex-wrap items-center gap-3 border-b border-slate-200 px-5 py-4">
-          <div className="font-semibold tracking-wide">ACC-20260513-0001</div>
-          <span className="rounded-full bg-emerald-50 px-3 py-1 text-sm font-medium text-emerald-700">
-            通话中
+          <div className="font-semibold tracking-wide">
+            {activeSession?.id || '等待司机发起会话'}
+          </div>
+          <span
+            className={`rounded-full px-3 py-1 text-sm font-medium ${
+              isCallEnded ? 'bg-slate-100 text-slate-600' : 'bg-emerald-50 text-emerald-700'
+            }`}
+          >
+            {isCallEnded ? '已结束' : '通话中'}
           </span>
           <span className="font-mono text-sm text-slate-600">03:25</span>
-          <span className="ml-auto inline-flex items-center gap-2 rounded-full bg-red-50 px-3 py-1 text-sm font-medium text-red-700">
-            <span className="h-2 w-2 rounded-full bg-red-500" />
-            录像中
+          <span
+            className={`ml-auto inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-medium ${
+              isRecording ? 'bg-red-50 text-red-700' : 'bg-slate-100 text-slate-600'
+            }`}
+          >
+            <span className={`h-2 w-2 rounded-full ${isRecording ? 'bg-red-500' : 'bg-slate-400'}`} />
+            {isRecording ? '录像中' : '未录像'}
           </span>
           <button className="rounded-md border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
             返回列表
@@ -47,24 +154,34 @@ function App() {
           </section>
 
           <aside className="grid content-start gap-5">
+            {realtimeError ? (
+              <section className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm font-medium text-rose-700">
+                {realtimeError}
+              </section>
+            ) : null}
+
             <section className="rounded-lg border border-slate-200 p-4">
               <h2 className="mb-3 text-sm font-semibold text-slate-500">会话信息</h2>
               <dl className="space-y-3 text-sm">
                 <div className="flex justify-between gap-4">
                   <dt className="text-slate-500">司机</dt>
-                  <dd className="font-medium">李某</dd>
+                  <dd className="font-medium">{activeSession?.driverName || '-'}</dd>
                 </div>
                 <div className="flex justify-between gap-4">
                   <dt className="text-slate-500">电话</dt>
-                  <dd className="font-medium">138****</dd>
+                  <dd className="font-medium">{activeSession?.driverPhoneMasked || '-'}</dd>
                 </div>
                 <div className="flex justify-between gap-4">
                   <dt className="text-slate-500">位置</dt>
-                  <dd className="font-medium text-emerald-700">已获取</dd>
+                  <dd className="font-medium text-emerald-700">
+                    {displayLocationStatus(activeSession?.locationStatus)}
+                  </dd>
                 </div>
                 <div className="flex justify-between gap-4">
                   <dt className="text-slate-500">网络</dt>
-                  <dd className="font-medium text-emerald-700">良好</dd>
+                  <dd className="font-medium text-emerald-700">
+                    {displayNetworkStatus(activeSession?.networkStatus)}
+                  </dd>
                 </div>
               </dl>
             </section>
@@ -72,7 +189,7 @@ function App() {
             <section className="rounded-lg border border-slate-200 p-4">
               <h2 className="mb-3 text-sm font-semibold text-slate-500">事故描述</h2>
               <p className="text-sm leading-6 text-slate-700">
-                车辆追尾，司机已在路边等待处理，现场无明显人员受伤。
+                {activeSession?.description || '暂无事故描述'}
               </p>
             </section>
           </aside>
@@ -88,19 +205,49 @@ function App() {
           </div>
 
           <div className="flex flex-wrap gap-3">
-            {controls.map((control) => (
-              <button
-                key={control.text}
-                className={`min-w-24 rounded-md px-5 py-3 text-sm font-semibold ring-1 ${control.tone}`}
-              >
-                {control.text}
-              </button>
-            ))}
+            <button className="min-w-24 rounded-md bg-white px-5 py-3 text-sm font-semibold text-slate-800 ring-1 ring-slate-200">
+              静音
+            </button>
+            <button className="min-w-24 rounded-md bg-white px-5 py-3 text-sm font-semibold text-slate-800 ring-1 ring-slate-200">
+              摄像头
+            </button>
+            <button
+              className="min-w-24 rounded-md bg-emerald-600 px-5 py-3 text-sm font-semibold text-white ring-1 ring-emerald-600 disabled:bg-slate-300 disabled:ring-slate-300"
+              disabled={!activeSession || isUpdating || isRecording || isCallEnded}
+              onClick={() => void handleStartRecording()}
+            >
+              {isUpdating ? '处理中' : '开始录像'}
+            </button>
+            <button
+              className="min-w-24 rounded-md bg-rose-600 px-5 py-3 text-sm font-semibold text-white ring-1 ring-rose-600 disabled:bg-slate-300 disabled:ring-slate-300"
+              disabled={!activeSession || isUpdating || isCallEnded}
+              onClick={() => void handleEndCall()}
+            >
+              结束通话
+            </button>
           </div>
         </footer>
       </section>
     </main>
   )
+}
+
+function displayLocationStatus(status?: string) {
+  return status === 'ready' ? '已获取' : '未获取'
+}
+
+function displayNetworkStatus(status?: string) {
+  return status === 'good' ? '良好' : '未知'
+}
+
+function displaySignalingStatus(status?: string) {
+  if (status === 'connected') {
+    return '已连接'
+  }
+  if (status === 'disconnected') {
+    return '已断开'
+  }
+  return '未连接'
 }
 
 export default App

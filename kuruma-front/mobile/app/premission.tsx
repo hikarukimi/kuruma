@@ -4,8 +4,7 @@ import * as Location from 'expo-location';
 import { router } from 'expo-router';
 import { Pressable, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-
-import { loadAuthToken } from 'services/auth';
+import { loadAuthToken } from 'services';
 
 type PermissionKey = 'camera' | 'microphone' | 'location';
 type PermissionState = Record<PermissionKey, boolean>;

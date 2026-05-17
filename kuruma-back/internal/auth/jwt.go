@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -19,6 +20,11 @@ type JWTClaims struct {
 	ExpiresAt int64  `json:"exp"`
 	IssuedAt  int64  `json:"iat"`
 }
+
+var (
+	ErrInvalidToken = errors.New("invalid token")
+	ErrExpiredToken = errors.New("expired token")
+)
 
 func GenerateToken(user *model.User, secret string, ttl time.Duration) (string, error) {
 	if user == nil {
@@ -65,4 +71,65 @@ func GenerateToken(user *model.User, secret string, ttl time.Duration) (string, 
 	signature := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 
 	return signingInput + "." + signature, nil
+}
+
+func ParseToken(token string, secret string) (*JWTClaims, error) {
+	token = strings.TrimSpace(token)
+	if token == "" || strings.TrimSpace(secret) == "" {
+		return nil, ErrInvalidToken
+	}
+
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return nil, ErrInvalidToken
+	}
+
+	headerJSON, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return nil, ErrInvalidToken
+	}
+
+	var header struct {
+		Algorithm string `json:"alg"`
+		Type      string `json:"typ"`
+	}
+	if err := json.Unmarshal(headerJSON, &header); err != nil {
+		return nil, ErrInvalidToken
+	}
+	if header.Algorithm != "HS256" || header.Type != "JWT" {
+		return nil, ErrInvalidToken
+	}
+
+	signingInput := parts[0] + "." + parts[1]
+	mac := hmac.New(sha256.New, []byte(secret))
+	if _, err := mac.Write([]byte(signingInput)); err != nil {
+		return nil, ErrInvalidToken
+	}
+	expectedSignature := mac.Sum(nil)
+
+	actualSignature, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if err != nil {
+		return nil, ErrInvalidToken
+	}
+	if !hmac.Equal(actualSignature, expectedSignature) {
+		return nil, ErrInvalidToken
+	}
+
+	claimsJSON, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return nil, ErrInvalidToken
+	}
+
+	var claims JWTClaims
+	if err := json.Unmarshal(claimsJSON, &claims); err != nil {
+		return nil, ErrInvalidToken
+	}
+	if claims.Subject == "" || claims.ExpiresAt <= 0 {
+		return nil, ErrInvalidToken
+	}
+	if time.Now().Unix() >= claims.ExpiresAt {
+		return nil, ErrExpiredToken
+	}
+
+	return &claims, nil
 }

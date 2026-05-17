@@ -3,8 +3,7 @@ import { Camera } from 'expo-camera';
 import * as Location from 'expo-location';
 import { router } from 'expo-router';
 import { ActivityIndicator, Text, View } from 'react-native';
-
-import { loadAuthToken } from 'services/auth';
+import { loadAuthToken } from 'services';
 
 type PermissionState = {
   camera: boolean;
@@ -17,32 +16,33 @@ function hasAllPermissions(permissions: PermissionState) {
 }
 
 export default function IndexRoute() {
-  const applyStartupState = useCallback((nextPermissions: PermissionState) => {
-    router.replace(hasAllPermissions(nextPermissions) ? '/home' : '/premission');
-  }, []);
 
   const checkStartupState = useCallback(async () => {
-    const token = await loadAuthToken();
-    if (!token) {
-      router.replace('/login');
-      return;
-    }
-
     const [camera, microphone, location] = await Promise.all([
       Camera.getCameraPermissionsAsync(),
       Camera.getMicrophonePermissionsAsync(),
       Location.getForegroundPermissionsAsync(),
     ]);
-
-    applyStartupState({
+    const shouldGoToPermission=!hasAllPermissions({
       camera: camera.granted,
       microphone: microphone.granted,
       location: location.granted,
-    });
-  }, [applyStartupState]);
+    })
+    if(shouldGoToPermission){
+      router.replace('/premission');
+      return;
+    }
+    
+    const token = await loadAuthToken();
+    if (!token) {
+      router.replace('/login');
+      return;
+    }
+    router.replace('/home');
+  }, []);
 
   useEffect(() => {
-    void checkStartupState();
+    checkStartupState();
   }, [checkStartupState]);
 
   return (
