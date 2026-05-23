@@ -53,6 +53,19 @@ export async function listSessions() {
   return data.sessions || []
 }
 
+export async function getSession(sessionId: string) {
+  const response = await fetch(`${apiBaseUrl}/sessions/${sessionId}`, {
+    headers: authHeader(),
+  })
+  const data = (await response.json()) as SessionResponse
+
+  if (!response.ok || !data.session) {
+    throw new Error(data.error || '获取会话详情失败')
+  }
+
+  return data.session
+}
+
 export async function createSession(input: CreateSessionInput = {}) {
   const response = await fetch(`${apiBaseUrl}/sessions`, {
     method: 'POST',
