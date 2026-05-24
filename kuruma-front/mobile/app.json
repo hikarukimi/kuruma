@@ -23,6 +23,8 @@
           "locationWhenInUsePermission": "允许 Kuruma 使用当前位置记录事故地点。"
         }
       ],
+      "@config-plugins/react-native-webrtc",
+      "expo-dev-client",
       "expo-router"
     ],
     "orientation": "portrait",
@@ -35,9 +37,11 @@
     },
     "assetBundlePatterns": ["**/*"],
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.kuruma.mobile"
     },
     "android": {
+      "package": "com.kuruma.mobile",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"

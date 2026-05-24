@@ -40,6 +40,14 @@ type SessionsResponse = {
   error?: string
 }
 
+//描述 WebSocket 收到的实时信令消息结构
+export type RealtimeSignalMessage = {
+  type: string
+  sessionId?: string
+  role?: string
+  payload?: unknown
+}
+
 export async function listSessions() {
   const response = await fetch(`${apiBaseUrl}/sessions`, {
     headers: authHeader(),
@@ -93,6 +101,7 @@ export function connectSessionRealtime(
   sessionId: string,
   onSessionUpdated: (session: AccidentSession) => void,
   onError?: (message: string) => void,
+  onSignal?: (message: RealtimeSignalMessage) => void,
 ) {
   const params = new URLSearchParams({
     sessionId,
@@ -105,6 +114,11 @@ export function connectSessionRealtime(
     const message = JSON.parse(event.data)
     if (message.type === 'session.updated' && message.payload) {
       onSessionUpdated(message.payload)
+      return
+    }
+
+    if (message.type?.startsWith('webrtc.')) {
+      onSignal?.(message)
     }
   }
 
@@ -119,6 +133,12 @@ export function connectSessionRealtime(
   }
 
   return socket
+}
+
+export function sendRealtimeSignal(socket: WebSocket | null, type: string, payload?: unknown) {
+  if (socket?.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify({ type, payload }))
+  }
 }
 
 export function connectAvailableSessionsRealtime(

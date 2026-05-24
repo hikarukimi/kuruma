@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import {
@@ -8,6 +8,7 @@ import {
   listSessions,
 } from '../sessions'
 import { clearToken } from '../service'
+import { useMessage } from '../components/message'
 
 type SessionFilter = 'waiting' | 'processing' | 'ended'
 
@@ -24,34 +25,50 @@ function PoliceWorkbench() {
   const [activeFilter, setActiveFilter] = useState<SessionFilter>('waiting')
   const [keyword, setKeyword] = useState('')
   const [isLoading, setIsLoading] = useState(true)
-  const [errorMessage, setErrorMessage] = useState('')
-  const [realtimeMessage, setRealtimeMessage] = useState('')
   const [, setNow] = useState(() => Date.now())
+  const { showMessage } = useMessage()
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000)
     return () => window.clearInterval(timer)
   }, [])
 
+  const loadSessions = useCallback(async () => {
+    try {
+      const nextSessions = await listSessions()
+      setSessions(nextSessions)
+    } catch (error) {
+      showMessage({
+        text: error instanceof Error ? error.message : '获取请求列表失败',
+        type: 'error',
+      })
+    } finally {
+      setIsLoading(false)
+    }
+  }, [showMessage])
+
   useEffect(() => {
-    void loadSessions()
-  }, [])
+    const timer = window.setTimeout(() => {
+      void loadSessions()
+    }, 0)
+
+    return () => window.clearTimeout(timer)
+  }, [loadSessions])
 
   useEffect(() => {
     const socket = connectAvailableSessionsRealtime(
       (nextSession) => {
         setSessions((currentSessions) => upsertSession(currentSessions, nextSession))
-        setRealtimeMessage('')
       },
       (message) => {
-        setRealtimeMessage(message)
+        showMessage({ text: message, type: 'warning' })
       },
     )
 
     return () => {
       socket.close()
     }
-  }, [])
+  }, [showMessage])
 
   const visibleSessions = useMemo(() => {
     const normalizedKeyword = keyword.trim().toLowerCase()
@@ -88,17 +105,16 @@ function PoliceWorkbench() {
       selectedSession.id,
       (nextSession) => {
         setSessions((currentSessions) => upsertSession(currentSessions, nextSession))
-        setRealtimeMessage('')
       },
       (message) => {
-        setRealtimeMessage(message)
+        showMessage({ text: message, type: 'warning' })
       },
     )
 
     return () => {
       socket.close()
     }
-  }, [selectedSession?.id])
+  }, [selectedSession?.id, showMessage])
 
   const overviewItems = useMemo(() => {
     const todaySessions = sessions.filter((session) => isToday(session.createdAt))
@@ -112,20 +128,6 @@ function PoliceWorkbench() {
       },
     ]
   }, [sessions])
-
-  async function loadSessions() {
-    setIsLoading(true)
-    setErrorMessage('')
-
-    try {
-      const nextSessions = await listSessions()
-      setSessions(nextSessions)
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : '获取请求列表失败')
-    } finally {
-      setIsLoading(false)
-    }
-  }
 
   function handleLogout() {
     clearToken()
@@ -189,23 +191,6 @@ function PoliceWorkbench() {
             />
           </div>
         </section>
-
-        {(errorMessage || realtimeMessage) && (
-          <section className="border-b border-slate-200 px-5 py-3">
-            {errorMessage ? (
-              <div className="flex flex-wrap items-center gap-3 rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">
-                <span>{errorMessage}</span>
-                <button className="ml-auto font-semibold text-rose-800" onClick={() => void loadSessions()} type="button">
-                  重试
-                </button>
-              </div>
-            ) : (
-              <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-700">
-                {realtimeMessage}
-              </div>
-            )}
-          </section>
-        )}
 
         <div className="grid flex-1 gap-5 p-5 lg:grid-cols-[minmax(0,1fr)_20rem]">
           <section>

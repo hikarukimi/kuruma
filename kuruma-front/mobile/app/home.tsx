@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Camera } from 'expo-camera';
 import * as Location from 'expo-location';
 import {
@@ -13,8 +13,24 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { connectDriverRealtime, sendDriverHeartbeat } from 'services/realtime';
+import { RTCVideoView } from 'components/RTCVideoView';
+import { useMessage } from 'components/MessageProvider';
+import {
+  connectDriverRealtime,
+  type RealtimeSignalMessage,
+  sendDriverHeartbeat,
+  sendRealtimeSignal,
+} from 'services/realtime';
 import { createSession, type AccidentSession } from 'services/sessions';
+import {
+  mediaDevices,
+  RTCIceCandidate,
+  RTCPeerConnection,
+  RTCSessionDescription,
+  type WebRTCIceCandidate,
+  type WebRTCMediaStream,
+  type WebRTCPeerConnection,
+} from 'services/webrtc';
 
 type ConnectionMode = 'video' | 'audio';
 
@@ -30,6 +46,10 @@ const initialReadiness: ReadinessState = {
   media: 'checking',
 };
 
+const rtcConfiguration = {
+  iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+};
+
 function getStatusStyle(isReady: boolean) {
   return isReady
     ? 'border-green-600 bg-green-100 text-green-700'
@@ -41,8 +61,12 @@ export default function HomeRoute() {
   const [session, setSession] = useState<AccidentSession | null>(null);
   const [description, setDescription] = useState('');
   const [submittingMode, setSubmittingMode] = useState<ConnectionMode | null>(null);
-  const [submitError, setSubmitError] = useState('');
-  const [realtimeError, setRealtimeError] = useState('');
+  const [callStatus, setCallStatus] = useState('未连接');
+  const [localStream, setLocalStream] = useState<WebRTCMediaStream | null>(null);
+  const [remoteStream, setRemoteStream] = useState<WebRTCMediaStream | null>(null);
+  const peerConnectionRef = useRef<WebRTCPeerConnection | null>(null);
+  const socketRef = useRef<WebSocket | null>(null);
+  const { showMessage } = useMessage();
 
   const isChecking = readiness.location === 'checking' || readiness.media === 'checking';
   const canStartConnection =
@@ -103,15 +127,14 @@ export default function HomeRoute() {
       },
       {
         key: 'call',
-        label: `通话${session?.callStatus === 'ended' ? '已结束' : '进行中'}`,
-        ready: Boolean(session) && session?.callStatus !== 'ended',
+        label: `媒体${session?.callStatus === 'ended' ? '已关闭' : callStatus}`,
+        ready: session?.callStatus !== 'ended' && callStatus === '已连接',
       },
     ],
-    [session]
+    [callStatus, session]
   );
 
   const checkReadiness = useCallback(async () => {
-    setSubmitError('');
     setReadiness(initialReadiness);
 
     const [camera, microphone, locationPermission] = await Promise.all([
@@ -156,12 +179,10 @@ export default function HomeRoute() {
         const message = isChecking
           ? '正在检查现场状态，请稍后再试'
           : '请先确认定位和音视频权限可用，且当前通话未结束';
-        setSubmitError(message);
-        Alert.alert('无法发起连接', message);
+        showMessage({ text: message, type: 'error' });
         return;
       }
 
-      setSubmitError('');
       setSubmittingMode(mode);
 
       try {
@@ -183,13 +204,12 @@ export default function HomeRoute() {
         );
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : '创建会话失败';
-        setSubmitError(message);
-        Alert.alert('无法发起连接', message);
+        showMessage({ text: message, type: 'error' });
       } finally {
         setSubmittingMode(null);
       }
     },
-    [canStartConnection, description, isChecking, readiness, session]
+    [canStartConnection, description, isChecking, readiness, session, showMessage]
   );
 
   useEffect(() => {
@@ -201,20 +221,173 @@ export default function HomeRoute() {
       return undefined;
     }
 
+    if (session.callStatus === 'ended') {
+      return undefined;
+    }
+
     let socket: WebSocket | null = null;
     let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
     let isActive = true;
+    let localMediaStream: WebRTCMediaStream | null = null;
+    const pendingRemoteCandidates: {
+      candidate: string;
+      sdpMLineIndex?: number | null;
+      sdpMid?: string | null;
+    }[] = [];
 
-    connectDriverRealtime({
-      sessionId: session.id,
-      onSessionUpdated: (nextSession) => {
-        setSession(nextSession);
-        setRealtimeError('');
-      },
-      onError: (message) => {
-        setRealtimeError(message);
-      },
-    })
+    const addRemoteCandidate = async (candidate: {
+      candidate: string;
+      sdpMLineIndex?: number | null;
+      sdpMid?: string | null;
+    }) => {
+      const peerConnection = peerConnectionRef.current;
+      if (!peerConnection) {
+        return;
+      }
+
+      if (!peerConnection.remoteDescription) {
+        pendingRemoteCandidates.push(candidate);
+        return;
+      }
+
+      await (
+        peerConnection as { addIceCandidate: (nextCandidate: unknown) => Promise<void> }
+      ).addIceCandidate(
+        new (RTCIceCandidate as new (nextCandidate: typeof candidate) => unknown)(candidate)
+      );
+    };
+
+    const flushRemoteCandidates = async () => {
+      while (pendingRemoteCandidates.length > 0) {
+        const candidate = pendingRemoteCandidates.shift();
+        if (candidate) {
+          await addRemoteCandidate(candidate);
+        }
+      }
+    };
+
+    const handleSignal = async (message: RealtimeSignalMessage) => {
+      const peerConnection = peerConnectionRef.current;
+      if (!peerConnection || message.role === 'driver') {
+        return;
+      }
+
+      try {
+        if (message.type === 'webrtc.offer' && message.payload) {
+          await (
+            peerConnection as { setRemoteDescription: (description: unknown) => Promise<void> }
+          ).setRemoteDescription(
+            new (RTCSessionDescription as new (description: {
+              sdp: string;
+              type: 'offer';
+            }) => unknown)(message.payload as { sdp: string; type: 'offer' })
+          );
+          await flushRemoteCandidates();
+          const answer = await peerConnection.createAnswer();
+          await peerConnection.setLocalDescription(answer);
+          sendRealtimeSignal(socketRef.current, 'webrtc.answer', answer);
+          return;
+        }
+
+        if (message.type === 'webrtc.leave') {
+          setCallStatus('已断开');
+          return;
+        }
+
+        if (message.type === 'webrtc.candidate' && message.payload) {
+          await addRemoteCandidate(
+            message.payload as {
+              candidate: string;
+              sdpMLineIndex?: number | null;
+              sdpMid?: string | null;
+            }
+          );
+        }
+      } catch (error: unknown) {
+        showMessage({
+          text: error instanceof Error ? error.message : '视频信令处理失败',
+          type: 'error',
+        });
+      }
+    };
+
+    const setupPeerConnection = async () => {
+      setCallStatus('正在接入');
+
+      if (!mediaDevices || !RTCPeerConnection) {
+        throw new Error('当前环境不支持 WebRTC');
+      }
+
+      const mediaStream = (await mediaDevices.getUserMedia({
+        audio: true,
+        video: {
+          facingMode: 'environment',
+          frameRate: 24,
+          width: 1280,
+          height: 720,
+        },
+      })) as WebRTCMediaStream;
+
+      if (!isActive) {
+        mediaStream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+
+      localMediaStream = mediaStream;
+      setLocalStream(mediaStream);
+
+      const peerConnection = new RTCPeerConnection(rtcConfiguration);
+      const peerConnectionEvents = peerConnection as unknown as {
+        addEventListener: (
+          type: 'track' | 'icecandidate' | 'connectionstatechange',
+          listener: (event: {
+            candidate?: WebRTCIceCandidate | null;
+            streams?: WebRTCMediaStream[];
+          }) => void
+        ) => void;
+      };
+      peerConnectionRef.current = peerConnection;
+      mediaStream.getTracks().forEach((track) => {
+        (peerConnection as { addTrack: (track: unknown, stream: unknown) => void }).addTrack(
+          track,
+          mediaStream
+        );
+      });
+
+      peerConnectionEvents.addEventListener('track', (event) => {
+        const [nextRemoteStream] = event.streams ?? [];
+        if (nextRemoteStream) {
+          setRemoteStream(nextRemoteStream);
+        }
+      });
+
+      peerConnectionEvents.addEventListener('icecandidate', (event) => {
+        if (event.candidate) {
+          sendRealtimeSignal(socketRef.current, 'webrtc.candidate', event.candidate.toJSON());
+        }
+      });
+
+      peerConnectionEvents.addEventListener('connectionstatechange', () => {
+        setCallStatus(displayPeerConnectionState(peerConnection.connectionState));
+      });
+    };
+
+    setupPeerConnection()
+      .then(() =>
+        connectDriverRealtime({
+          sessionId: session.id,
+          onSessionUpdated: (nextSession) => {
+            setSession(nextSession);
+          },
+          onError: (message) => {
+            showMessage({ text: message, type: 'warning' });
+          },
+          onSignal: (message) => void handleSignal(message),
+          onOpen: (openedSocket) => {
+            sendRealtimeSignal(openedSocket, 'webrtc.ready', { media: 'ready' });
+          },
+        })
+      )
       .then((nextSocket) => {
         if (!isActive) {
           nextSocket.close();
@@ -222,6 +395,7 @@ export default function HomeRoute() {
         }
 
         socket = nextSocket;
+        socketRef.current = nextSocket;
         heartbeatTimer = setInterval(() => {
           if (socket) {
             sendDriverHeartbeat(socket);
@@ -229,7 +403,11 @@ export default function HomeRoute() {
         }, 10000);
       })
       .catch((error: unknown) => {
-        setRealtimeError(error instanceof Error ? error.message : '实时连接失败');
+        showMessage({
+          text: error instanceof Error ? error.message : '实时连接失败',
+          type: 'error',
+        });
+        setCallStatus('连接失败');
       });
 
     return () => {
@@ -237,9 +415,16 @@ export default function HomeRoute() {
       if (heartbeatTimer) {
         clearInterval(heartbeatTimer);
       }
+      sendRealtimeSignal(socket, 'webrtc.leave');
       socket?.close();
+      socketRef.current = null;
+      peerConnectionRef.current?.close();
+      peerConnectionRef.current = null;
+      localMediaStream?.getTracks().forEach((track) => track.stop());
+      setLocalStream(null);
+      setRemoteStream(null);
     };
-  }, [session?.id]);
+  }, [session?.callStatus, session?.id, showMessage]);
 
   return (
     <SafeAreaView className="flex-1 bg-slate-50">
@@ -303,6 +488,41 @@ export default function HomeRoute() {
             </View>
           </View>
 
+          {session ? (
+            <View className="mb-7">
+              <Text className="mb-3 text-base font-bold text-gray-900">现场视频</Text>
+              <View className="overflow-hidden rounded-lg border border-slate-200 bg-slate-900">
+                {localStream ? (
+                  <RTCVideoView
+                    mirror={false}
+                    objectFit="cover"
+                    stream={localStream}
+                    style={{ height: 260, width: '100%' }}
+                  />
+                ) : (
+                  <View className="h-[260px] items-center justify-center">
+                    <ActivityIndicator color="#ffffff" size="small" />
+                    <Text className="mt-3 text-sm font-semibold text-white">正在打开摄像头</Text>
+                  </View>
+                )}
+                <View className="absolute bottom-3 left-3 rounded-md bg-black/60 px-3 py-2">
+                  <Text className="text-sm font-semibold text-white">
+                    发送给警察端：{callStatus}
+                  </Text>
+                </View>
+                {remoteStream ? (
+                  <View className="absolute right-3 bottom-3 h-28 w-20 overflow-hidden rounded-md border border-white/30 bg-black">
+                    <RTCVideoView
+                      objectFit="cover"
+                      stream={remoteStream}
+                      style={{ height: '100%', width: '100%' }}
+                    />
+                  </View>
+                ) : null}
+              </View>
+            </View>
+          ) : null}
+
           <View className="mb-7">
             <Text className="mb-3 text-base font-bold text-gray-900">事故描述</Text>
             <TextInput
@@ -317,18 +537,6 @@ export default function HomeRoute() {
             />
             <Text className="mt-2 text-right text-xs text-slate-500">{description.length}/300</Text>
           </View>
-
-          {submitError ? (
-            <Text className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
-              {submitError}
-            </Text>
-          ) : null}
-
-          {realtimeError ? (
-            <Text className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
-              {realtimeError}
-            </Text>
-          ) : null}
 
           <Pressable
             className={`h-[52px] flex-row items-center justify-center rounded-lg ${
@@ -372,5 +580,29 @@ function displaySignalingStatus(status?: string) {
   if (status === 'disconnected') {
     return '已断开';
   }
+  return '未连接';
+}
+
+function displayPeerConnectionState(state?: string) {
+  if (state === 'connected') {
+    return '已连接';
+  }
+
+  if (state === 'connecting') {
+    return '连接中';
+  }
+
+  if (state === 'failed') {
+    return '连接失败';
+  }
+
+  if (state === 'disconnected') {
+    return '已断开';
+  }
+
+  if (state === 'closed') {
+    return '已关闭';
+  }
+
   return '未连接';
 }

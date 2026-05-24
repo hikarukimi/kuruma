@@ -5,6 +5,7 @@ import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { AppHeader } from 'components/AppHeader';
+import { MessageProvider } from 'components/MessageProvider';
 
 import './global.css';
 
@@ -17,9 +18,11 @@ const routerContext = require.context('./app', true, /^(?:\.\/).*\.[tj]sx?$/);
 function AppWrapper({ children }: { children?: ReactNode }) {
   return (
     <SafeAreaProvider>
-      <AppHeader />
-      {children}
-      <StatusBar style="auto" />
+      <MessageProvider>
+        <AppHeader />
+        {children}
+        <StatusBar style="auto" />
+      </MessageProvider>
     </SafeAreaProvider>
   );
 }

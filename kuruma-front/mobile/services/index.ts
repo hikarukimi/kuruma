@@ -1,8 +1,11 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
 
-export const defaultApiBaseUrl = 'http://localhost:8080';
-export const defaultWsBaseUrl = 'ws://localhost:8080';
+const configuredApiBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL?.trim();
+const configuredWsBaseUrl = process.env.EXPO_PUBLIC_WS_BASE_URL?.trim();
+
+export const defaultApiBaseUrl = configuredApiBaseUrl || 'http://localhost:8080';
+export const defaultWsBaseUrl = configuredWsBaseUrl || defaultApiBaseUrl.replace(/^http/, 'ws');
 
 let authToken = '';
 const authTokenStorageKey = 'kuruma.authToken';
@@ -54,6 +57,6 @@ export async function authHeader() {
   const token = await loadAuthToken();
 
   return {
-    Authorization: `Bearer ${token}`
+    Authorization: `Bearer ${token}`,
   };
 }

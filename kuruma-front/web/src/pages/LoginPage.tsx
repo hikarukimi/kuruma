@@ -1,38 +1,39 @@
-import { type FormEvent, useState } from 'react'
+import { type SubmitEvent, useState } from 'react'
 
 import { loginUser } from '../service/auth'
+import { useNavigate } from 'react-router-dom'
+import { useMessage } from '../components/message'
 
-type LoginPageProps = {
-  onLoginSuccess?: () => void
-}
-
-function LoginPage({ onLoginSuccess }: LoginPageProps) {
+function LoginPage() {
   const [account, setAccount] = useState('')
   const [password, setPassword] = useState('')
-  const [errorMessage, setErrorMessage] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const navigate = useNavigate()
+  const { showMessage } = useMessage()
 
   const canSubmit = account.trim().length > 0 && password.length > 0 && !isSubmitting
 
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault()
 
     if (!account.trim() || !password) {
-      setErrorMessage('请输入账号和密码')
+      showMessage({ text: '请输入账号和密码', type: 'error' })
       return
     }
 
     setIsSubmitting(true)
-    setErrorMessage('')
 
     try {
       await loginUser({
         account: account.trim(),
         password,
       })
-      onLoginSuccess?.()
+      navigate('/sessions')
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : '登录失败，请稍后重试')
+      showMessage({
+        text: error instanceof Error ? error.message : '登录失败，请稍后重试',
+        type: 'error',
+      })
     } finally {
       setIsSubmitting(false)
     }
@@ -129,12 +130,6 @@ function LoginPage({ onLoginSuccess }: LoginPageProps) {
                   />
                 </label>
 
-                {errorMessage ? (
-                  <div className="rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">
-                    {errorMessage}
-                  </div>
-                ) : null}
-
                 <div className="flex items-center justify-between gap-4 text-sm">
                   <label className="flex items-center gap-2 font-medium text-slate-600">
                     <input
@@ -157,7 +152,6 @@ function LoginPage({ onLoginSuccess }: LoginPageProps) {
                 </button>
               </form>
             </div>
-
           </div>
         </section>
       </div>

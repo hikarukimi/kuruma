@@ -16,23 +16,22 @@ function hasAllPermissions(permissions: PermissionState) {
 }
 
 export default function IndexRoute() {
-
   const checkStartupState = useCallback(async () => {
     const [camera, microphone, location] = await Promise.all([
       Camera.getCameraPermissionsAsync(),
       Camera.getMicrophonePermissionsAsync(),
       Location.getForegroundPermissionsAsync(),
     ]);
-    const shouldGoToPermission=!hasAllPermissions({
+    const shouldGoToPermission = !hasAllPermissions({
       camera: camera.granted,
       microphone: microphone.granted,
       location: location.granted,
-    })
-    if(shouldGoToPermission){
+    });
+    if (shouldGoToPermission) {
       router.replace('/premission');
       return;
     }
-    
+
     const token = await loadAuthToken();
     if (!token) {
       router.replace('/login');

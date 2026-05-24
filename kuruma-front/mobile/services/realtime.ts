@@ -5,6 +5,15 @@ type ConnectDriverRealtimeOptions = {
   sessionId: string;
   onSessionUpdated: (session: AccidentSession) => void;
   onError: (message: string) => void;
+  onSignal?: (message: RealtimeSignalMessage) => void;
+  onOpen?: (socket: WebSocket) => void;
+};
+
+export type RealtimeSignalMessage = {
+  type: string;
+  sessionId?: string;
+  role?: string;
+  payload?: unknown;
 };
 
 export async function connectDriverRealtime(options: ConnectDriverRealtimeOptions) {
@@ -22,12 +31,18 @@ export async function connectDriverRealtime(options: ConnectDriverRealtimeOption
 
   socket.onopen = () => {
     socket.send(JSON.stringify({ type: 'session.join' }));
+    options.onOpen?.(socket);
   };
 
   socket.onmessage = (event) => {
     const message = JSON.parse(event.data);
     if (message.type === 'session.updated' && message.payload) {
       options.onSessionUpdated(message.payload);
+      return;
+    }
+
+    if (message.type?.startsWith('webrtc.')) {
+      options.onSignal?.(message);
     }
   };
 
@@ -47,5 +62,11 @@ export async function connectDriverRealtime(options: ConnectDriverRealtimeOption
 export function sendDriverHeartbeat(socket: WebSocket) {
   if (socket.readyState === WebSocket.OPEN) {
     socket.send(JSON.stringify({ type: 'driver.heartbeat' }));
+  }
+}
+
+export function sendRealtimeSignal(socket: WebSocket | null, type: string, payload?: unknown) {
+  if (socket?.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify({ type, payload }));
   }
 }

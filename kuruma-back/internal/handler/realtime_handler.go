@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -27,9 +28,10 @@ type RealtimeHandler struct {
 }
 
 type realtimeMessage struct {
-	Type      string           `json:"type"`
-	SessionID string           `json:"sessionId,omitempty"`
-	Payload   *service.Session `json:"payload,omitempty"`
+	Type      string      `json:"type"`
+	SessionID string      `json:"sessionId,omitempty"`
+	Role      string      `json:"role,omitempty"`
+	Payload   interface{} `json:"payload,omitempty"`
 }
 
 type realtimeClient struct {
@@ -153,7 +155,8 @@ func (h *RealtimeHandler) readPump(client *realtimeClient) {
 
 	for {
 		var message struct {
-			Type string `json:"type"`
+			Type    string          `json:"type"`
+			Payload json.RawMessage `json:"payload,omitempty"`
 		}
 		if err := client.conn.ReadJSON(&message); err != nil {
 			return
@@ -166,6 +169,14 @@ func (h *RealtimeHandler) readPump(client *realtimeClient) {
 			if err == nil {
 				h.BroadcastSession(session)
 			}
+		}
+		if strings.HasPrefix(message.Type, "webrtc.") {
+			h.hub.forward(client, realtimeMessage{
+				Type:      message.Type,
+				SessionID: client.sessionID,
+				Role:      client.role,
+				Payload:   message.Payload,
+			})
 		}
 	}
 }
@@ -275,6 +286,22 @@ func (h *realtimeHub) broadcastSessionCreated(session *service.Session) {
 	defer h.mu.RUnlock()
 
 	for client := range h.globals {
+		select {
+		case client.send <- message:
+		default:
+		}
+	}
+}
+
+func (h *realtimeHub) forward(sender *realtimeClient, message realtimeMessage) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	for client := range h.rooms[sender.sessionID] {
+		if client == sender {
+			continue
+		}
+
 		select {
 		case client.send <- message:
 		default:
