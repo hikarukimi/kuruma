@@ -44,6 +44,21 @@ export async function storeToken(token: string) {
   await FileSystem.writeAsStringAsync(authTokenFileUri, token);
 }
 
+export async function clearAuthToken() {
+  authToken = '';
+
+  if (Platform.OS === 'web' && typeof localStorage !== 'undefined') {
+    localStorage.removeItem(authTokenStorageKey);
+    return;
+  }
+
+  if (!authTokenFileUri) {
+    return;
+  }
+
+  await FileSystem.deleteAsync(authTokenFileUri, { idempotent: true });
+}
+
 export async function loadAuthToken() {
   if (authToken) {
     return authToken;

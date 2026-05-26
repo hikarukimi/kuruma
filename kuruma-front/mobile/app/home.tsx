@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Camera } from 'expo-camera';
 import * as Location from 'expo-location';
+import { router } from 'expo-router';
 import {
   ActivityIndicator,
   Alert,
@@ -15,6 +16,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { RTCVideoView } from 'components/RTCVideoView';
 import { useMessage } from 'components/MessageProvider';
+import { clearAuthToken } from 'services';
 import {
   connectDriverRealtime,
   type RealtimeSignalMessage,
@@ -211,6 +213,39 @@ export default function HomeRoute() {
     },
     [canStartConnection, description, isChecking, readiness, session, showMessage]
   );
+
+  const logout = useCallback(() => {
+    const performLogout = async () => {
+      try {
+        await clearAuthToken();
+        router.replace('/login');
+      } catch (error: unknown) {
+        showMessage({
+          text: error instanceof Error ? error.message : '退出登录失败',
+          type: 'error',
+        });
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      if (window.confirm('确定要退出当前账号吗？')) {
+        void performLogout();
+      }
+      return;
+    }
+
+    Alert.alert('退出登录', '确定要退出当前账号吗？', [
+      {
+        text: '取消',
+        style: 'cancel',
+      },
+      {
+        text: '退出',
+        style: 'destructive',
+        onPress: () => void performLogout(),
+      },
+    ]);
+  }, [showMessage]);
 
   useEffect(() => {
     void checkReadiness();
@@ -436,10 +471,20 @@ export default function HomeRoute() {
           contentContainerClassName="px-6 pb-10 pt-4"
           keyboardShouldPersistTaps="handled">
           <View className="mb-8">
-            <Text className="text-[28px] font-bold text-gray-900">事故连接</Text>
-            <Text className="mt-3 text-base leading-6 text-slate-600">
-              确认现场状态后加入事故会话，等待警察端处理。
-            </Text>
+            <View className="flex-row items-start justify-between gap-4">
+              <View className="flex-1">
+                <Text className="text-[28px] font-bold text-gray-900">事故连接</Text>
+                <Text className="mt-3 text-base leading-6 text-slate-600">
+                  确认现场状态后加入事故会话，等待警察端处理。
+                </Text>
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                className="h-10 items-center justify-center rounded-lg border border-slate-300 bg-white px-4"
+                onPress={logout}>
+                <Text className="text-sm font-semibold text-slate-700">退出登录</Text>
+              </Pressable>
+            </View>
           </View>
 
           <View className="mb-7">
