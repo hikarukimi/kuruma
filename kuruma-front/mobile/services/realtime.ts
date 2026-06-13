@@ -1,4 +1,4 @@
-import { defaultWsBaseUrl, loadAuthToken } from 'services';
+import { defaultWsBaseUrl, handleAuthExpired, loadValidAuthToken } from 'services';
 import type { AccidentSession } from 'services/sessions';
 
 type ConnectDriverRealtimeOptions = {
@@ -17,8 +17,9 @@ export type RealtimeSignalMessage = {
 };
 
 export async function connectDriverRealtime(options: ConnectDriverRealtimeOptions) {
-  const token = await loadAuthToken();
+  const token = await loadValidAuthToken();
   if (!token) {
+    await handleAuthExpired();
     throw new Error('请先登录');
   }
 

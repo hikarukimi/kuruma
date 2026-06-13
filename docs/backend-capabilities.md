@@ -66,12 +66,12 @@
 
 ### 6. 录像服务
 
-负责警察端开始和停止录像，并保存录像文件与元数据。
+负责警察端在 WebRTC 成功连接后自动开始录像，并保存录像文件与元数据。
 
 需要支持：
 
-- 开始录像。
-- 停止录像。
+- 连接成功后开始录像。
+- 通话结束或断开时停止录像。
 - 保存录像文件到本地文件系统。
 - 保存录像元数据。
 - 查询录像列表和录像详情。
@@ -113,8 +113,9 @@
 
 ### 录像
 
-- `POST /api/v1/sessions/:id/recordings/start`：开始录制当前会话。
-- `POST /api/v1/sessions/:id/recordings/stop`：停止录制当前会话。
+- `POST /api/v1/sessions/:id/recording/start`：标记当前会话开始录制。
+- `POST /api/v1/sessions/:id/recording/stop`：标记当前会话停止录制。
+- `POST /api/v1/sessions/:id/recordings`：上传当前会话录制完成的视频文件。
 - `GET /api/v1/recordings`：查询录像列表。
 - `GET /api/v1/recordings/:id`：查询录像详情。
 - `GET /api/v1/recordings/:id/file`：下载或访问录像文件。

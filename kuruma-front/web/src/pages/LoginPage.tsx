@@ -2,7 +2,7 @@ import { type SubmitEvent, useState } from 'react'
 
 import { loginUser } from '../service/auth'
 import { useNavigate } from 'react-router-dom'
-import { useMessage } from '../components/message'
+import { useMessage } from '../components/message-context'
 
 function LoginPage() {
   const [account, setAccount] = useState('')
@@ -130,7 +130,7 @@ function LoginPage() {
                   />
                 </label>
 
-                <div className="flex items-center justify-between gap-4 text-sm">
+                <div className="flex items-center text-sm">
                   <label className="flex items-center gap-2 font-medium text-slate-600">
                     <input
                       className="h-4 w-4 rounded border-slate-300 text-emerald-600 accent-emerald-600"
@@ -139,9 +139,6 @@ function LoginPage() {
                     />
                     保持登录
                   </label>
-                  <button className="font-semibold text-emerald-700 hover:text-emerald-800" type="button">
-                    忘记密码
-                  </button>
                 </div>
 
                 <button

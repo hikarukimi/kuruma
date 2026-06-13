@@ -15,6 +15,46 @@ export type AccidentSession = {
   updatedAt: string
 }
 
+export type SessionRecording = {
+  id: string
+  sessionId: string
+  callId?: string
+  status: string
+  fileSize: number
+  mimeType: string
+  startedAt?: string
+  completedAt?: string
+  createdAt: string
+  updatedAt: string
+  downloadUrl: string
+}
+
+export type TranscriptSegment = {
+  id: string
+  transcriptId: string
+  sessionId: string
+  recordingId: string
+  chunkIndex: number
+  segmentIndex: number
+  speaker: string
+  content: string
+  createdAt: string
+}
+
+export type CallTranscript = {
+  id: string
+  sessionId: string
+  recordingId: string
+  status: string
+  provider: string
+  model: string
+  errorMessage?: string
+  completedAt?: string
+  createdAt: string
+  updatedAt: string
+  segments: TranscriptSegment[]
+}
+
 export type CreateSessionInput = Partial<
   Pick<
     AccidentSession,
@@ -37,6 +77,16 @@ type SessionResponse = {
 
 type SessionsResponse = {
   sessions?: AccidentSession[]
+  error?: string
+}
+
+type RecordingsResponse = {
+  recordings?: SessionRecording[]
+  error?: string
+}
+
+type TranscriptResponse = {
+  transcripts?: CallTranscript[]
   error?: string
 }
 
@@ -91,6 +141,88 @@ export async function createSession(input: CreateSessionInput = {}) {
 
 export async function startRecording(sessionId: string) {
   return updateSession(`${sessionId}/recording/start`, '开始录像失败')
+}
+
+export async function stopRecording(sessionId: string) {
+  return updateSession(`${sessionId}/recording/stop`, '停止录像失败')
+}
+
+export async function uploadRecording(sessionId: string, file: Blob, mimeType: string) {
+  const formData = new FormData()
+  const extension = recordingExtension(mimeType)
+  formData.append('file', file, `${sessionId}-${Date.now()}.${extension}`)
+  formData.append('mimeType', mimeType)
+
+  const response = await fetch(`${apiBaseUrl}/sessions/${sessionId}/recordings`, {
+    method: 'POST',
+    headers: authHeader(),
+    body: formData,
+  })
+  const data = (await response.json()) as SessionResponse & { recording?: unknown }
+
+  if (!response.ok || !data.recording) {
+    throw new Error(data.error || '上传录像失败')
+  }
+
+  return data.session
+}
+
+function recordingExtension(mimeType: string) {
+  if (mimeType.includes('wav')) {
+    return 'wav'
+  }
+  if (mimeType.includes('mpeg') || mimeType.includes('mp3')) {
+    return 'mp3'
+  }
+  if (mimeType.includes('mp4')) {
+    return 'mp4'
+  }
+  return 'webm'
+}
+
+export async function listSessionRecordings(sessionId: string) {
+  const response = await fetch(`${apiBaseUrl}/sessions/${sessionId}/recordings`, {
+    headers: authHeader(),
+  })
+  const data = (await response.json()) as RecordingsResponse
+
+  if (!response.ok) {
+    throw new Error(data.error || '获取录像列表失败')
+  }
+
+  return data.recordings || []
+}
+
+export async function fetchRecordingBlob(sessionId: string, recordingId: string) {
+  const response = await fetch(`${apiBaseUrl}/sessions/${sessionId}/recordings/${recordingId}/file`, {
+    headers: authHeader(),
+  })
+
+  if (!response.ok) {
+    let errorMessage = '获取录像文件失败'
+    try {
+      const data = (await response.json()) as { error?: string }
+      errorMessage = data.error || errorMessage
+    } catch {
+      // 文件接口异常时可能不是 JSON，保留通用错误信息。
+    }
+    throw new Error(errorMessage)
+  }
+
+  return response.blob()
+}
+
+export async function getSessionTranscript(sessionId: string) {
+  const response = await fetch(`${apiBaseUrl}/sessions/${sessionId}/transcript`, {
+    headers: authHeader(),
+  })
+  const data = (await response.json()) as TranscriptResponse
+
+  if (!response.ok) {
+    throw new Error(data.error || '获取通话文本失败')
+  }
+
+  return data.transcripts || []
 }
 
 export async function endCall(sessionId: string) {

@@ -4,14 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	"gorm.io/gorm"
 
 	"kuruma-back/internal/auth"
+	"kuruma-back/internal/repository"
 	"kuruma-back/internal/service"
 )
 
@@ -22,6 +26,7 @@ const (
 
 type RealtimeHandler struct {
 	sessions  *service.SessionService
+	calls     *repository.CallRepository
 	jwtSecret string
 	hub       *realtimeHub
 	upgrader  websocket.Upgrader
@@ -38,6 +43,7 @@ type realtimeClient struct {
 	conn      *websocket.Conn
 	sessionID string
 	role      string
+	userID    uint64
 	send      chan realtimeMessage
 	global    bool
 }
@@ -48,9 +54,10 @@ type realtimeHub struct {
 	globals map[*realtimeClient]struct{}
 }
 
-func NewRealtimeHandler(sessions *service.SessionService, jwtSecret string) *RealtimeHandler {
+func NewRealtimeHandler(sessions *service.SessionService, calls *repository.CallRepository, jwtSecret string) *RealtimeHandler {
 	return &RealtimeHandler{
 		sessions:  sessions,
+		calls:     calls,
 		jwtSecret: jwtSecret,
 		hub: &realtimeHub{
 			rooms:   make(map[string]map[*realtimeClient]struct{}),
@@ -108,7 +115,8 @@ func (h *RealtimeHandler) Connect(c *gin.Context) {
 		return
 	}
 
-	if _, err := auth.ParseToken(token, h.jwtSecret); err != nil {
+	claims, err := auth.ParseToken(token, h.jwtSecret)
+	if err != nil {
 		status := http.StatusUnauthorized
 		message := "invalid authorization token"
 		if errors.Is(err, auth.ErrExpiredToken) {
@@ -117,6 +125,7 @@ func (h *RealtimeHandler) Connect(c *gin.Context) {
 		c.JSON(status, gin.H{"error": message})
 		return
 	}
+	userID, _ := strconv.ParseUint(claims.Subject, 10, 64)
 
 	session, err := h.sessions.Get(c.Request.Context(), sessionID)
 	if err != nil {
@@ -133,6 +142,7 @@ func (h *RealtimeHandler) Connect(c *gin.Context) {
 		conn:      conn,
 		sessionID: sessionID,
 		role:      role,
+		userID:    userID,
 		send:      make(chan realtimeMessage, 8),
 	}
 	h.hub.add(client)
@@ -170,7 +180,8 @@ func (h *RealtimeHandler) readPump(client *realtimeClient) {
 				h.BroadcastSession(session)
 			}
 		}
-		if strings.HasPrefix(message.Type, "webrtc.") {
+		if strings.HasPrefix(message.Type, "webrtc.") || strings.HasPrefix(message.Type, "call.") {
+			h.recordRealtimeCallEvent(client, message.Type)
 			h.hub.forward(client, realtimeMessage{
 				Type:      message.Type,
 				SessionID: client.sessionID,
@@ -178,6 +189,36 @@ func (h *RealtimeHandler) readPump(client *realtimeClient) {
 				Payload:   message.Payload,
 			})
 		}
+	}
+}
+
+func (h *RealtimeHandler) recordRealtimeCallEvent(client *realtimeClient, messageType string) {
+	if h.calls == nil || client == nil {
+		return
+	}
+
+	ctx := context.Background()
+	participant := repository.CallParticipant{
+		UserID: client.userID,
+		Role:   client.role,
+	}
+
+	var err error
+	switch messageType {
+	case "webrtc.offer":
+		_, err = h.calls.StartSignaling(ctx, client.sessionID, participant)
+	case "webrtc.answer":
+		_, err = h.calls.UpdateParticipant(ctx, client.sessionID, participant)
+	case "call.connected":
+		_, err = h.calls.MarkConnected(ctx, client.sessionID, participant)
+	case "webrtc.leave":
+		_, err = h.calls.EndLatestOpen(ctx, client.sessionID, repository.CallStatusDisconnected, "webrtc.leave")
+	default:
+		return
+	}
+
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		log.Printf("record %s for session %s: %v", messageType, client.sessionID, err)
 	}
 }
 

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { useMessage } from '../components/message'
+import { useMessage } from '../components/message-context'
 import {
   type AccidentSession,
   connectAvailableSessionsRealtime,
@@ -10,6 +10,8 @@ import {
   type RealtimeSignalMessage,
   sendRealtimeSignal,
   startRecording,
+  stopRecording,
+  uploadRecording,
 } from '../sessions'
 
 const rtcConfiguration: RTCConfiguration = {
@@ -105,9 +107,13 @@ function SessionConsole() {
     let ignore = false
     let socket: WebSocket | null = null
     let peerConnection: RTCPeerConnection | null = null
+    let videoRecorder: CallVideoRecorder | null = null
+    let recordingUploadPromise: Promise<void> = Promise.resolve()
+    let hasReportedConnected = false
     const pendingRemoteCandidates: RTCIceCandidateInit[] = []
     const localVideoElement = localVideoRef.current
     const remoteVideoElement = remoteVideoRef.current
+    let remoteMediaStream: MediaStream | null = null
 
     // 主动发起 offer，推动远端进入协商流程。
     const sendOffer = async () => {
@@ -141,6 +147,68 @@ function SessionConsole() {
           await addRemoteCandidate(candidate)
         }
       }
+    }
+
+    const startCallRecording = async () => {
+      if (
+        videoRecorder ||
+        !localStreamRef.current ||
+        !remoteMediaStream
+      ) {
+        return
+      }
+
+      const videoTracks = remoteMediaStream.getVideoTracks().filter((track) => track.readyState === 'live')
+      if (videoTracks.length === 0) {
+        return
+      }
+
+      try {
+        videoRecorder = await startVideoRecorder(localStreamRef.current, remoteMediaStream)
+
+        const nextSession = await startRecording(activeSession.id)
+        if (!ignore) {
+          setSession(nextSession)
+        }
+      } catch (error) {
+        await videoRecorder?.stop()
+        videoRecorder = null
+        showMessage({
+          text: error instanceof Error ? error.message : '开始录像失败',
+          type: 'error',
+        })
+      }
+    }
+
+    const stopCallRecording = () => {
+      if (!videoRecorder) {
+        return recordingUploadPromise
+      }
+
+      const recorder = videoRecorder
+      videoRecorder = null
+      recordingUploadPromise = recorder
+        .stop()
+        .then((blob) => {
+          if (blob.size === 0) {
+            return stopRecording(activeSession.id)
+          }
+
+          return uploadRecording(activeSession.id, blob, blob.type)
+        })
+        .then((nextSession) => {
+          if (!ignore && nextSession) {
+            setSession(nextSession)
+          }
+        })
+        .catch((error) => {
+          showMessage({
+            text: error instanceof Error ? error.message : '上传录像失败',
+            type: 'error',
+          })
+        })
+
+      return recordingUploadPromise
     }
 
     // 统一处理信令消息，按 type 驱动 WebRTC 的各个状态转换。
@@ -218,7 +286,11 @@ function SessionConsole() {
         peerConnection.ontrack = (event) => {
           const [remoteStream] = event.streams
           if (remoteVideoRef.current && remoteStream) {
+            remoteMediaStream = remoteStream
             remoteVideoRef.current.srcObject = remoteStream
+            if (peerConnection?.connectionState === 'connected') {
+              void startCallRecording()
+            }
           }
         }
 
@@ -229,7 +301,19 @@ function SessionConsole() {
         }
 
         peerConnection.onconnectionstatechange = () => {
-          setConnectionState(displayPeerConnectionState(peerConnection?.connectionState))
+          const state = peerConnection?.connectionState
+          setConnectionState(displayPeerConnectionState(state))
+          if (state === 'connected') {
+            if (!hasReportedConnected) {
+              hasReportedConnected = true
+              sendRealtimeSignal(socket, 'call.connected')
+            }
+            void startCallRecording()
+            return
+          }
+          if (state === 'disconnected' || state === 'failed' || state === 'closed') {
+            void stopCallRecording()
+          }
         }
 
         if (socket.readyState === WebSocket.OPEN) {
@@ -255,6 +339,7 @@ function SessionConsole() {
       // 会话切换或页面卸载时，主动释放信令、连接和本地媒体资源。
       ignore = true
       sendRealtimeSignal(socket, 'webrtc.leave')
+      void stopCallRecording()
       socket?.close()
       peerConnection?.close()
       localStreamRef.current?.getTracks().forEach((track) => track.stop())
@@ -300,26 +385,6 @@ function SessionConsole() {
       track.enabled = !nextCameraOff
     })
     setIsCameraOff(nextCameraOff)
-  }
-
-  // 请求后端开始录像，并把返回的最新会话状态写回本地。
-  const handleStartRecording = async () => {
-    if (!activeSession || isUpdating) {
-      return
-    }
-
-    setIsUpdating(true)
-    try {
-      const nextSession = await startRecording(activeSession.id)
-      setSession(nextSession)
-    } catch (error) {
-      showMessage({
-        text: error instanceof Error ? error.message : '开始录像失败',
-        type: 'error',
-      })
-    } finally {
-      setIsUpdating(false)
-    }
   }
 
   // 结束当前通话，并同步服务端返回的会话状态。
@@ -468,10 +533,10 @@ function SessionConsole() {
             </button>
             <button
               className="min-w-24 rounded-md bg-emerald-600 px-5 py-3 text-sm font-semibold text-white ring-1 ring-emerald-600 disabled:bg-slate-300 disabled:ring-slate-300"
-              disabled={!activeSession || isUpdating || isRecording || isCallEnded}
-              onClick={() => void handleStartRecording()}
+              disabled
+              type="button"
             >
-              {isUpdating ? '处理中' : '开始录像'}
+              {isRecording ? '自动录像中' : '连接后自动录像'}
             </button>
             <button
               className="min-w-24 rounded-md bg-rose-600 px-5 py-3 text-sm font-semibold text-white ring-1 ring-rose-600 disabled:bg-slate-300 disabled:ring-slate-300"
@@ -527,6 +592,94 @@ function displayPeerConnectionState(state?: RTCPeerConnectionState) {
   }
 
   return '未连接'
+}
+
+type CallVideoRecorder = {
+  stop: () => Promise<Blob>
+}
+
+async function startVideoRecorder(localStream: MediaStream, remoteStream: MediaStream): Promise<CallVideoRecorder> {
+  if (!window.MediaRecorder) {
+    throw new Error('当前浏览器不支持视频录制')
+  }
+
+  const videoTracks = remoteStream.getVideoTracks().filter((track) => track.readyState === 'live')
+  if (videoTracks.length === 0) {
+    throw new Error('没有可录制的视频轨道')
+  }
+
+  const recordingStream = new MediaStream(videoTracks)
+  const AudioContextClass =
+    window.AudioContext ?? (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+  const audioSources: MediaStreamAudioSourceNode[] = []
+  let audioContext: AudioContext | null = null
+
+  const audioTracks = [
+    ...remoteStream.getAudioTracks(),
+    ...localStream.getAudioTracks(),
+  ].filter((track) => track.readyState === 'live')
+
+  if (AudioContextClass && audioTracks.length > 0) {
+    audioContext = new AudioContextClass()
+    await audioContext.resume()
+
+    const destination = audioContext.createMediaStreamDestination()
+    const connectStream = (stream: MediaStream) => {
+      if (stream.getAudioTracks().some((track) => track.readyState === 'live')) {
+        const source = audioContext?.createMediaStreamSource(stream)
+        if (source) {
+          source.connect(destination)
+          audioSources.push(source)
+        }
+      }
+    }
+
+    connectStream(remoteStream)
+    connectStream(localStream)
+    destination.stream.getAudioTracks().forEach((track) => recordingStream.addTrack(track))
+  } else {
+    audioTracks.forEach((track) => recordingStream.addTrack(track))
+  }
+
+  const mimeType = preferredVideoMimeType()
+  const recorder = new MediaRecorder(recordingStream, mimeType ? { mimeType } : undefined)
+  const chunks: BlobPart[] = []
+  const stopPromise = new Promise<Blob>((resolve, reject) => {
+    recorder.ondataavailable = (event) => {
+      if (event.data.size > 0) {
+        chunks.push(event.data)
+      }
+    }
+    recorder.onerror = (event) => {
+      reject((event as Event & { error?: Error }).error ?? new Error('视频录制失败'))
+    }
+    recorder.onstop = () => {
+      audioSources.forEach((source) => source.disconnect())
+      void audioContext?.close()
+      resolve(new Blob(chunks, { type: recorder.mimeType || mimeType || 'video/webm' }))
+    }
+  })
+
+  recorder.start(1000)
+
+  return {
+    stop: async () => {
+      if (recorder.state !== 'inactive') {
+        recorder.stop()
+      }
+      return stopPromise
+    },
+  }
+}
+
+function preferredVideoMimeType() {
+  const supportedTypes = [
+    'video/webm;codecs=vp9,opus',
+    'video/webm;codecs=vp8,opus',
+    'video/webm',
+  ]
+
+  return supportedTypes.find((type) => MediaRecorder.isTypeSupported(type)) ?? ''
 }
 
 export default SessionConsole

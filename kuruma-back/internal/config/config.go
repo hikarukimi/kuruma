@@ -13,13 +13,18 @@ const (
 )
 
 type Config struct {
-	AppName         string
-	Env             string
-	Port            string
-	DBDriver        string
-	DBDSN           string
-	JWTSecret       string
-	JWTExpiresHours int
+	AppName            string
+	Env                string
+	Port               string
+	DBDriver           string
+	DBDSN              string
+	JWTSecret          string
+	JWTExpiresHours    int
+	StorageLocalPath   string
+	BigModelAPIKey     string
+	BigModelEndpoint   string
+	BigModelModel      string
+	BigModelMaxAudioMB int
 }
 
 func Load() Config {
@@ -37,13 +42,17 @@ func (c Config) HTTPAddress() string {
 
 func loadFile(path string) (Config, error) {
 	cfg := Config{
-		AppName:         "",
-		Env:             "",
-		Port:            "",
-		DBDriver:        "",
-		DBDSN:           "",
-		JWTSecret:       "kuruma-dev-secret",
-		JWTExpiresHours: 24,
+		AppName:            "",
+		Env:                "",
+		Port:               "",
+		DBDriver:           "",
+		DBDSN:              "",
+		JWTSecret:          "kuruma-dev-secret",
+		JWTExpiresHours:    24,
+		StorageLocalPath:   "./storage",
+		BigModelEndpoint:   "https://open.bigmodel.cn/api/paas/v4/audio/transcriptions",
+		BigModelModel:      "glm-asr-2512",
+		BigModelMaxAudioMB: 25,
 	}
 
 	data, err := os.ReadFile(filepath.Clean(path))
@@ -67,6 +76,15 @@ func loadFile(path string) (Config, error) {
 			JWTSecret       string `yaml:"jwt_secret"`
 			JWTExpiresHours int    `yaml:"jwt_expires_hours"`
 		} `yaml:"auth"`
+		Storage struct {
+			LocalPath string `yaml:"local_path"`
+		} `yaml:"storage"`
+		BigModel struct {
+			APIKey     string `yaml:"api_key"`
+			Endpoint   string `yaml:"endpoint"`
+			Model      string `yaml:"model"`
+			MaxAudioMB int    `yaml:"max_audio_mb"`
+		} `yaml:"bigmodel"`
 	}
 
 	if err := yaml.Unmarshal(data, &fileConfig); err != nil {
@@ -93,6 +111,21 @@ func loadFile(path string) (Config, error) {
 	}
 	if fileConfig.Auth.JWTExpiresHours > 0 {
 		cfg.JWTExpiresHours = fileConfig.Auth.JWTExpiresHours
+	}
+	if fileConfig.Storage.LocalPath != "" {
+		cfg.StorageLocalPath = fileConfig.Storage.LocalPath
+	}
+	if fileConfig.BigModel.APIKey != "" {
+		cfg.BigModelAPIKey = fileConfig.BigModel.APIKey
+	}
+	if fileConfig.BigModel.Endpoint != "" {
+		cfg.BigModelEndpoint = fileConfig.BigModel.Endpoint
+	}
+	if fileConfig.BigModel.Model != "" {
+		cfg.BigModelModel = fileConfig.BigModel.Model
+	}
+	if fileConfig.BigModel.MaxAudioMB > 0 {
+		cfg.BigModelMaxAudioMB = fileConfig.BigModel.MaxAudioMB
 	}
 
 	return cfg, nil

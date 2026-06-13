@@ -18,3 +18,9 @@ redis:
 
 storage:
   local_path: ./storage
+
+bigmodel:
+  api_key: ""
+  endpoint: https://open.bigmodel.cn/api/paas/v4/audio/transcriptions
+  model: glm-asr-2512
+  max_audio_mb: 25

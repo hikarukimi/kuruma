@@ -8,7 +8,7 @@ import {
   listSessions,
 } from '../sessions'
 import { clearToken } from '../service'
-import { useMessage } from '../components/message'
+import { useMessage } from '../components/message-context'
 
 type SessionFilter = 'waiting' | 'processing' | 'ended'
 
@@ -95,6 +95,7 @@ function PoliceWorkbench() {
       null,
     [selectedSessionId, visibleSessions],
   )
+  const selectedSessionStatus = selectedSession ? sessionStatus(selectedSession) : null
 
   useEffect(() => {
     if (!selectedSession?.id) {
@@ -135,11 +136,25 @@ function PoliceWorkbench() {
   }
 
   function handleEnterSession(session: AccidentSession | null) {
-    if (!session || sessionStatus(session) === 'ended') {
+    if (!session) {
+      return
+    }
+
+    if (sessionStatus(session) === 'ended') {
+      navigate(`/sessions/${session.id}/recording`)
       return
     }
 
     navigate(`/sessions/${session.id}`)
+  }
+
+  function handleSelectSession(session: AccidentSession) {
+    if (sessionStatus(session) === 'ended') {
+      navigate(`/sessions/${session.id}/recording`)
+      return
+    }
+
+    setSelectedSessionId(session.id)
   }
 
   return (
@@ -213,7 +228,7 @@ function PoliceWorkbench() {
                           : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
                       }`}
                       key={session.id}
-                      onClick={() => setSelectedSessionId(session.id)}
+                      onClick={() => handleSelectSession(session)}
                       onDoubleClick={() => handleEnterSession(session)}
                     >
                       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -291,11 +306,10 @@ function PoliceWorkbench() {
                   </dl>
                   <button
                     className="mt-5 h-11 w-full rounded-md bg-emerald-600 px-4 text-sm font-semibold text-white hover:bg-emerald-700 disabled:bg-slate-300"
-                    disabled={sessionStatus(selectedSession) === 'ended'}
                     onClick={() => handleEnterSession(selectedSession)}
                     type="button"
                   >
-                    接入处理
+                    {selectedSessionStatus === 'ended' ? '查看详情' : '接入处理'}
                   </button>
                 </>
               ) : (

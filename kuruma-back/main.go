@@ -23,11 +23,21 @@ func main() {
 	}
 
 	userRepository := repository.NewUserRepository(db)
+	callRepository := repository.NewCallRepository(db)
+	recordingRepository := repository.NewRecordingRepository(db, cfg.StorageLocalPath)
+	transcriptRepository := repository.NewTranscriptRepository(db)
+	transcriptionService := service.NewTranscriptionService(cfg, recordingRepository, transcriptRepository)
 	authService := service.NewAuthService(userRepository, cfg.JWTSecret, cfg.JWTExpiresHours)
 	authHandler := handler.NewAuthHandler(authService)
 	sessionService := service.NewSessionService()
-	sessionHandler := handler.NewSessionHandler(sessionService)
-	realtimeHandler := handler.NewRealtimeHandler(sessionService, cfg.JWTSecret)
+	sessionHandler := handler.NewSessionHandler(
+		sessionService,
+		callRepository,
+		recordingRepository,
+		transcriptRepository,
+		transcriptionService,
+	)
+	realtimeHandler := handler.NewRealtimeHandler(sessionService, callRepository, cfg.JWTSecret)
 	sessionHandler.SetBroadcaster(realtimeHandler)
 
 	router := server.NewRouter(cfg, authHandler, sessionHandler, realtimeHandler)

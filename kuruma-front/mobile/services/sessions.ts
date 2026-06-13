@@ -1,4 +1,4 @@
-import { authHeader, defaultApiBaseUrl } from 'services';
+import { assertAuthorizedResponse, authHeader, defaultApiBaseUrl } from 'services';
 
 export type AccidentSession = {
   id: string;
@@ -44,6 +44,7 @@ export async function listSessions() {
   const response = await fetch(`${defaultApiBaseUrl}/api/v1/sessions`, {
     headers: await authHeader(),
   });
+  await assertAuthorizedResponse(response);
   const data = (await response.json()) as SessionsResponse;
 
   if (!response.ok) {
@@ -56,9 +57,13 @@ export async function listSessions() {
 export async function createSession(input: CreateSessionInput = {}) {
   const response = await fetch(`${defaultApiBaseUrl}/api/v1/sessions`, {
     method: 'POST',
-    headers: await authHeader(),
+    headers: {
+      ...(await authHeader()),
+      'Content-Type': 'application/json',
+    },
     body: JSON.stringify(input),
   });
+  await assertAuthorizedResponse(response);
   const data = (await response.json()) as SessionResponse;
 
   if (!response.ok || !data.session) {

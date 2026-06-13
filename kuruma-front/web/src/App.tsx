@@ -3,6 +3,8 @@ import { MessageProvider } from './components/message'
 import LoginPage from './pages/LoginPage'
 import PoliceWorkbench from './pages/PoliceWorkbench'
 import SessionConsole from './pages/SessionConsole'
+import SessionRecordingDetail from './pages/SessionRecordingDetail'
+import SessionTranscriptPage from './pages/SessionTranscriptPage'
 
 const loginPath = '/login'
 const sessionConsolePath = '/sessions'
@@ -15,6 +17,8 @@ function App() {
           <Route element={<Navigate replace to={loginPath} />} path="/" />
           <Route element={<LoginPage />} path={loginPath} />
           <Route element={<PoliceWorkbench />} path={sessionConsolePath} />
+          <Route element={<SessionRecordingDetail />} path={`${sessionConsolePath}/:sessionId/recording`} />
+          <Route element={<SessionTranscriptPage />} path={`${sessionConsolePath}/:sessionId/transcript`} />
           <Route element={<SessionConsole />} path={`${sessionConsolePath}/:sessionId`} />
           <Route element={<Navigate replace to={loginPath} />} path="*" />
         </Routes>

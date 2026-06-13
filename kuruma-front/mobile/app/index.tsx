@@ -3,7 +3,7 @@ import { Camera } from 'expo-camera';
 import * as Location from 'expo-location';
 import { router } from 'expo-router';
 import { ActivityIndicator, Text, View } from 'react-native';
-import { loadAuthToken } from 'services';
+import { loadValidAuthToken } from 'services';
 
 type PermissionState = {
   camera: boolean;
@@ -32,7 +32,7 @@ export default function IndexRoute() {
       return;
     }
 
-    const token = await loadAuthToken();
+    const token = await loadValidAuthToken();
     if (!token) {
       router.replace('/login');
       return;

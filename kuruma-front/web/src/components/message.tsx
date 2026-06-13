@@ -1,31 +1,6 @@
-import { createContext, type ReactNode, useCallback, useContext, useMemo, useRef, useState } from 'react'
+import { type ReactNode, useCallback, useMemo, useRef, useState } from 'react'
 
-export type MessageType = 'error' | 'warning' | 'success' | 'info'
-
-export type MessageInput = {
-  text: string
-  type?: MessageType
-  duration?: number
-}
-
-export type MessageItem = Required<MessageInput> & {
-  id: number
-}
-
-export type MessageContextValue = {
-  showMessage: (message: MessageInput) => void
-}
-
-export const MessageContext = createContext<MessageContextValue | null>(null)
-
-export function useMessage() {
-  const context = useContext(MessageContext)
-  if (!context) {
-    throw new Error('useMessage must be used within MessageProvider')
-  }
-
-  return context
-}
+import { MessageContext, type MessageInput, type MessageItem, type MessageType } from './message-context'
 
 const defaultDuration = 4000
 

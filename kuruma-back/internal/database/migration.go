@@ -19,5 +19,9 @@ func AutoMigrate(db *gorm.DB) error {
 func migrationModels() []any {
 	return []any{
 		&model.User{},
+		&model.Call{},
+		&model.Recording{},
+		&model.CallTranscript{},
+		&model.TranscriptSegment{},
 	}
 }
