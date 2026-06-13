@@ -63,11 +63,13 @@ export default function HomeRoute() {
   const [session, setSession] = useState<AccidentSession | null>(null);
   const [description, setDescription] = useState('');
   const [submittingMode, setSubmittingMode] = useState<ConnectionMode | null>(null);
+  const [activeMedia, setActiveMedia] = useState<ConnectionMode | null>(null);
   const [callStatus, setCallStatus] = useState('未连接');
   const [localStream, setLocalStream] = useState<WebRTCMediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<WebRTCMediaStream | null>(null);
   const peerConnectionRef = useRef<WebRTCPeerConnection | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
+  const activeMediaRef = useRef<ConnectionMode | null>(null);
   const { showMessage } = useMessage();
 
   const isChecking = readiness.location === 'checking' || readiness.media === 'checking';
@@ -188,6 +190,7 @@ export default function HomeRoute() {
       }
 
       setSubmittingMode(mode);
+      activeMediaRef.current = mode;
 
       try {
         const activeSession =
@@ -200,6 +203,7 @@ export default function HomeRoute() {
             signalingStatus: 'idle',
             callStatus: 'active',
           }));
+        setActiveMedia(mode);
         setSession(activeSession);
 
         Alert.alert(
@@ -207,6 +211,8 @@ export default function HomeRoute() {
           `当前会话：${activeSession.id}`
         );
       } catch (error: unknown) {
+        activeMediaRef.current = null;
+        setActiveMedia(null);
         const message = error instanceof Error ? error.message : '创建会话失败';
         showMessage({ text: message, type: 'error' });
       } finally {
@@ -215,6 +221,35 @@ export default function HomeRoute() {
     },
     [canStartConnection, description, isChecking, readiness, session, showMessage]
   );
+
+  const toggleActiveMedia = useCallback(() => {
+    if (!localStream || !activeMedia) {
+      showMessage({ text: '媒体流尚未准备好', type: 'warning' });
+      return;
+    }
+
+    const nextMedia: ConnectionMode = activeMedia === 'video' ? 'audio' : 'video';
+    localStream.getVideoTracks().forEach((track) => {
+      track.enabled = nextMedia === 'video';
+    });
+    activeMediaRef.current = nextMedia;
+    setActiveMedia(nextMedia);
+  }, [activeMedia, localStream, showMessage]);
+
+  const disconnectCall = useCallback(() => {
+    sendRealtimeSignal(socketRef.current, 'webrtc.leave');
+    socketRef.current?.close();
+    socketRef.current = null;
+    peerConnectionRef.current?.close();
+    peerConnectionRef.current = null;
+    localStream?.getTracks().forEach((track) => track.stop());
+    setCallStatus('已断开');
+    setSession(null);
+    setLocalStream(null);
+    setRemoteStream(null);
+    activeMediaRef.current = null;
+    setActiveMedia(null);
+  }, [localStream]);
 
   const logout = useCallback(() => {
     const performLogout = async () => {
@@ -283,6 +318,8 @@ export default function HomeRoute() {
       setSession(null);
       setLocalStream(null);
       setRemoteStream(null);
+      activeMediaRef.current = null;
+      setActiveMedia(null);
     };
 
     const addRemoteCandidate = async (candidate: {
@@ -384,6 +421,11 @@ export default function HomeRoute() {
       }
 
       localMediaStream = mediaStream;
+      if (activeMediaRef.current === 'audio') {
+        mediaStream.getVideoTracks().forEach((track) => {
+          track.enabled = false;
+        });
+      }
       setLocalStream(mediaStream);
 
       const peerConnection = new RTCPeerConnection(rtcConfiguration);
@@ -613,35 +655,59 @@ export default function HomeRoute() {
             <Text className="mt-2 text-right text-xs text-slate-500">{description.length}/300</Text>
           </View>
 
-          <Pressable
-            className={`h-[52px] flex-row items-center justify-center rounded-lg ${
-              canStartConnection ? 'bg-blue-600' : 'bg-slate-300'
-            }`}
-            disabled={!canStartConnection}
-            onPress={() => void submitConnection('video')}>
-            {submittingMode === 'video' ? <ActivityIndicator color="#ffffff" size="small" /> : null}
-            <Text
-              className={`text-[17px] font-bold ${
-                submittingMode === 'video' ? 'ml-2' : ''
-              } ${canStartConnection ? 'text-white' : 'text-slate-500'}`}>
-              {submittingMode === 'video' ? '提交中...' : '发起视频连接'}
-            </Text>
-          </Pressable>
+          {isCommunicating ? (
+            <>
+              <Pressable
+                className="h-[52px] flex-row items-center justify-center rounded-lg bg-blue-600"
+                onPress={toggleActiveMedia}>
+                <Text className="text-[17px] font-bold text-white">
+                  {activeMedia === 'video' ? '仅语音' : '视频通信'}
+                </Text>
+              </Pressable>
 
-          <Pressable
-            className={`mt-3 h-[52px] flex-row items-center justify-center rounded-lg border ${
-              canStartConnection ? 'border-blue-600 bg-white' : 'border-slate-300 bg-white'
-            }`}
-            disabled={!canStartConnection}
-            onPress={() => void submitConnection('audio')}>
-            {submittingMode === 'audio' ? <ActivityIndicator color="#2563eb" size="small" /> : null}
-            <Text
-              className={`text-[17px] font-bold ${
-                submittingMode === 'audio' ? 'ml-2' : ''
-              } ${canStartConnection ? 'text-blue-600' : 'text-slate-400'}`}>
-              {submittingMode === 'audio' ? '提交中...' : '仅发起语音连接'}
-            </Text>
-          </Pressable>
+              <Pressable
+                className="mt-3 h-[52px] flex-row items-center justify-center rounded-lg border border-red-500 bg-white"
+                onPress={disconnectCall}>
+                <Text className="text-[17px] font-bold text-red-600">断开连接</Text>
+              </Pressable>
+            </>
+          ) : (
+            <>
+              <Pressable
+                className={`h-[52px] flex-row items-center justify-center rounded-lg ${
+                  canStartConnection ? 'bg-blue-600' : 'bg-slate-300'
+                }`}
+                disabled={!canStartConnection}
+                onPress={() => void submitConnection('video')}>
+                {submittingMode === 'video' ? (
+                  <ActivityIndicator color="#ffffff" size="small" />
+                ) : null}
+                <Text
+                  className={`text-[17px] font-bold ${
+                    submittingMode === 'video' ? 'ml-2' : ''
+                  } ${canStartConnection ? 'text-white' : 'text-slate-500'}`}>
+                  {submittingMode === 'video' ? '提交中...' : '发起视频连接'}
+                </Text>
+              </Pressable>
+
+              <Pressable
+                className={`mt-3 h-[52px] flex-row items-center justify-center rounded-lg border ${
+                  canStartConnection ? 'border-blue-600 bg-white' : 'border-slate-300 bg-white'
+                }`}
+                disabled={!canStartConnection}
+                onPress={() => void submitConnection('audio')}>
+                {submittingMode === 'audio' ? (
+                  <ActivityIndicator color="#2563eb" size="small" />
+                ) : null}
+                <Text
+                  className={`text-[17px] font-bold ${
+                    submittingMode === 'audio' ? 'ml-2' : ''
+                  } ${canStartConnection ? 'text-blue-600' : 'text-slate-400'}`}>
+                  {submittingMode === 'audio' ? '提交中...' : '仅发起语音连接'}
+                </Text>
+              </Pressable>
+            </>
+          )}
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
