@@ -23,11 +23,26 @@ export function clearToken() {
 }
 
 export function authHeader() {
-  if (!jwtToken) {
-    getJwtToken()
+  const token = getJwtToken()
+  if (!token) {
+    handleAuthExpired()
   }
 
   return {
-    Authorization: `Bearer ${jwtToken}`,
+    Authorization: `Bearer ${token}`,
+  }
+}
+
+export function handleAuthExpired() {
+  clearToken()
+  if (window.location.pathname !== '/login') {
+    window.location.replace('/login')
+  }
+  throw new Error('请先登录')
+}
+
+export async function assertAuthorizedResponse(response: Response) {
+  if (response.status === 401) {
+    handleAuthExpired()
   }
 }

@@ -10,8 +10,6 @@ import (
 	"kuruma-back/internal/auth"
 )
 
-const JWTClaimsContextKey = "jwtClaims"
-
 func authMiddleware(secret string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token := bearerToken(c.GetHeader("Authorization"))
@@ -30,7 +28,7 @@ func authMiddleware(secret string) gin.HandlerFunc {
 			return
 		}
 
-		c.Set(JWTClaimsContextKey, claims)
+		c.Set(auth.JWTClaimsContextKey, claims)
 		c.Next()
 	}
 }

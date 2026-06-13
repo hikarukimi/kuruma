@@ -1,4 +1,4 @@
-import { apiBaseUrl, authHeader, getJwtToken, wsBaseUrl } from './service'
+import { apiBaseUrl, assertAuthorizedResponse, authHeader, getJwtToken, handleAuthExpired, wsBaseUrl } from './service'
 
 export type AccidentSession = {
   id: string
@@ -107,6 +107,7 @@ export async function listSessions() {
   const response = await fetch(`${apiBaseUrl}/sessions`, {
     headers: authHeader(),
   })
+  await assertAuthorizedResponse(response)
   const data = (await response.json()) as SessionsResponse
 
   if (!response.ok) {
@@ -120,6 +121,7 @@ export async function getSession(sessionId: string) {
   const response = await fetch(`${apiBaseUrl}/sessions/${sessionId}`, {
     headers: authHeader(),
   })
+  await assertAuthorizedResponse(response)
   const data = (await response.json()) as SessionResponse
 
   if (!response.ok || !data.session) {
@@ -135,6 +137,7 @@ export async function createSession(input: CreateSessionInput = {}) {
     headers: authHeader(),
     body: JSON.stringify(input),
   })
+  await assertAuthorizedResponse(response)
   const data = (await response.json()) as SessionResponse
 
   if (!response.ok || !data.session) {
@@ -163,6 +166,7 @@ export async function uploadRecording(sessionId: string, file: Blob, mimeType: s
     headers: authHeader(),
     body: formData,
   })
+  await assertAuthorizedResponse(response)
   const data = (await response.json()) as SessionResponse & { recording?: unknown }
 
   if (!response.ok || !data.recording) {
@@ -189,6 +193,7 @@ export async function listSessionRecordings(sessionId: string) {
   const response = await fetch(`${apiBaseUrl}/sessions/${sessionId}/recordings`, {
     headers: authHeader(),
   })
+  await assertAuthorizedResponse(response)
   const data = (await response.json()) as RecordingsResponse
 
   if (!response.ok) {
@@ -202,6 +207,7 @@ export async function fetchRecordingBlob(sessionId: string, recordingId: string)
   const response = await fetch(`${apiBaseUrl}/sessions/${sessionId}/recordings/${recordingId}/file`, {
     headers: authHeader(),
   })
+  await assertAuthorizedResponse(response)
 
   if (!response.ok) {
     let errorMessage = '获取录像文件失败'
@@ -221,6 +227,7 @@ export async function getSessionTranscript(sessionId: string) {
   const response = await fetch(`${apiBaseUrl}/sessions/${sessionId}/transcript`, {
     headers: authHeader(),
   })
+  await assertAuthorizedResponse(response)
   const data = (await response.json()) as TranscriptResponse
 
   if (!response.ok) {
@@ -240,10 +247,15 @@ export function connectSessionRealtime(
   onError?: (message: string) => void,
   onSignal?: (message: RealtimeSignalMessage) => void,
 ) {
+  const token = getJwtToken()
+  if (!token) {
+    handleAuthExpired()
+  }
+
   const params = new URLSearchParams({
     sessionId,
     role: 'police',
-    token: getJwtToken(),
+    token,
   })
   const socket = new WebSocket(`${wsBaseUrl}/ws?${params.toString()}`)
   let hasOpened = false
@@ -289,12 +301,17 @@ export function sendRealtimeSignal(socket: WebSocket | null, type: string, paylo
 }
 
 export function connectAvailableSessionsRealtime(
-  onSessionCreated: (session: AccidentSession) => void,
+  onSessionChanged: (session: AccidentSession) => void,
   onError?: (message: string) => void,
 ) {
+  const token = getJwtToken()
+  if (!token) {
+    handleAuthExpired()
+  }
+
   const params = new URLSearchParams({
     role: 'police',
-    token: getJwtToken(),
+    token,
   })
   const socket = new WebSocket(`${wsBaseUrl}/ws/global?${params.toString()}`)
   let hasOpened = false
@@ -306,8 +323,8 @@ export function connectAvailableSessionsRealtime(
 
   socket.onmessage = (event) => {
     const message = JSON.parse(event.data)
-    if (message.type === 'session.created' && message.payload) {
-      onSessionCreated(message.payload)
+    if ((message.type === 'session.created' || message.type === 'session.updated') && message.payload) {
+      onSessionChanged(message.payload)
     }
   }
 
@@ -343,6 +360,7 @@ async function updateSession(path: string, fallbackMessage: string) {
     method: 'POST',
     headers: authHeader(),
   })
+  await assertAuthorizedResponse(response)
   const data = (await response.json()) as SessionResponse
 
   if (!response.ok || !data.session) {

@@ -4,17 +4,15 @@ import { useNavigate } from 'react-router-dom'
 import {
   type AccidentSession,
   connectAvailableSessionsRealtime,
-  connectSessionRealtime,
   listSessions,
 } from '../sessions'
 import { clearToken } from '../service'
 import { useMessage } from '../components/message-context'
 
-type SessionFilter = 'waiting' | 'processing' | 'ended'
+type SessionFilter = 'waiting' | 'ended'
 
 const filterItems: Array<{ label: string; value: SessionFilter }> = [
   { label: '待处理', value: 'waiting' },
-  { label: '处理中', value: 'processing' },
   { label: '已结束', value: 'ended' },
 ]
 
@@ -97,36 +95,13 @@ function PoliceWorkbench() {
   )
   const selectedSessionStatus = selectedSession ? sessionStatus(selectedSession) : null
 
-  useEffect(() => {
-    if (!selectedSession?.id) {
-      return
-    }
-
-    const connection = connectSessionRealtime(
-      selectedSession.id,
-      (nextSession) => {
-        setSessions((currentSessions) => upsertSession(currentSessions, nextSession))
-      },
-      (message) => {
-        showMessage({ text: message, type: 'warning' })
-      },
-    )
-
-    return () => {
-      connection.disconnect()
-    }
-  }, [selectedSession?.id, showMessage])
-
   const overviewItems = useMemo(() => {
     const todaySessions = sessions.filter((session) => isToday(session.createdAt))
 
     return [
       { label: '今日请求', value: String(todaySessions.length) },
-      { label: '等待中', value: String(sessions.filter((session) => sessionStatus(session) === 'waiting').length) },
-      {
-        label: '正在处理',
-        value: String(sessions.filter((session) => sessionStatus(session) === 'processing').length),
-      },
+      { label: '待处理', value: String(sessions.filter((session) => sessionStatus(session) === 'waiting').length) },
+      { label: '已结束', value: String(sessions.filter((session) => sessionStatus(session) === 'ended').length) },
     ]
   }, [sessions])
 
@@ -340,22 +315,10 @@ function sessionStatus(session: AccidentSession): SessionFilter {
     return 'ended'
   }
 
-  if (
-    session.recordingStatus === 'recording' ||
-    session.signalingStatus === 'connected' ||
-    session.driverOnline
-  ) {
-    return 'processing'
-  }
-
   return 'waiting'
 }
 
 function displaySessionStatus(status: SessionFilter) {
-  if (status === 'processing') {
-    return '处理中'
-  }
-
   if (status === 'ended') {
     return '已结束'
   }
@@ -364,10 +327,6 @@ function displaySessionStatus(status: SessionFilter) {
 }
 
 function statusBadgeClass(status: SessionFilter) {
-  if (status === 'processing') {
-    return 'bg-sky-50 text-sky-700'
-  }
-
   if (status === 'ended') {
     return 'bg-slate-100 text-slate-600'
   }

@@ -314,6 +314,13 @@ func (h *realtimeHub) broadcastSession(session *service.Session) {
 		default:
 		}
 	}
+
+	for client := range h.globals {
+		select {
+		case client.send <- message:
+		default:
+		}
+	}
 }
 
 func (h *realtimeHub) broadcastSessionCreated(session *service.Session) {

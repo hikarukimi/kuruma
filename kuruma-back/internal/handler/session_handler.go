@@ -5,11 +5,13 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
+	"kuruma-back/internal/auth"
 	"kuruma-back/internal/model"
 	"kuruma-back/internal/repository"
 	"kuruma-back/internal/service"
@@ -109,6 +111,7 @@ func (h *SessionHandler) Create(c *gin.Context) {
 	}
 
 	session, err := h.sessions.Create(c.Request.Context(), service.CreateSessionInput{
+		DriverID:          currentUserID(c),
 		DriverName:        req.DriverName,
 		DriverPhoneMasked: req.DriverPhoneMasked,
 		Description:       req.Description,
@@ -126,6 +129,25 @@ func (h *SessionHandler) Create(c *gin.Context) {
 
 	h.broadcastCreated(session)
 	c.JSON(http.StatusCreated, gin.H{"session": session})
+}
+
+func currentUserID(c *gin.Context) uint64 {
+	claimsValue, ok := c.Get(auth.JWTClaimsContextKey)
+	if !ok {
+		return 0
+	}
+
+	claims, ok := claimsValue.(*auth.JWTClaims)
+	if !ok {
+		return 0
+	}
+
+	userID, err := strconv.ParseUint(claims.Subject, 10, 64)
+	if err != nil {
+		return 0
+	}
+
+	return userID
 }
 
 func (h *SessionHandler) List(c *gin.Context) {

@@ -25,6 +25,7 @@ var ErrSessionNotFound = errors.New("session not found")
 
 type Session struct {
 	ID                string    `json:"id"`
+	DriverID          uint64    `json:"driverId,omitempty"`
 	DriverName        string    `json:"driverName"`
 	DriverPhoneMasked string    `json:"driverPhoneMasked"`
 	Description       string    `json:"description"`
@@ -39,6 +40,7 @@ type Session struct {
 }
 
 type CreateSessionInput struct {
+	DriverID          uint64
 	DriverName        string
 	DriverPhoneMasked string
 	Description       string
@@ -76,9 +78,16 @@ func (s *SessionService) Create(ctx context.Context, input CreateSessionInput) (
 	if input.DriverOnline != nil {
 		driverOnline = *input.DriverOnline
 	}
+	if input.DriverID != 0 {
+		if session := s.findReusableDriverSession(input.DriverID); session != nil {
+			applyCreateInput(session, input, now)
+			return cloneSession(session), nil
+		}
+	}
 
 	session := &Session{
 		ID:                s.nextID(now),
+		DriverID:          input.DriverID,
 		DriverName:        driverName,
 		DriverPhoneMasked: driverPhoneMasked,
 		Description:       strings.TrimSpace(input.Description),
@@ -95,6 +104,27 @@ func (s *SessionService) Create(ctx context.Context, input CreateSessionInput) (
 	s.nextSeq++
 
 	return cloneSession(session), nil
+}
+
+func (s *SessionService) findReusableDriverSession(driverID uint64) *Session {
+	var unclaimed *Session
+	unclaimedCount := 0
+
+	for _, session := range s.sessions {
+		if session.DriverID == driverID && session.CallStatus != CallStatusEnded {
+			return session
+		}
+		if session.DriverID == 0 && session.CallStatus != CallStatusEnded {
+			unclaimedCount++
+			unclaimed = session
+		}
+	}
+	if unclaimedCount == 1 {
+		unclaimed.DriverID = driverID
+		return unclaimed
+	}
+
+	return nil
 }
 
 func (s *SessionService) List(ctx context.Context) ([]*Session, error) {
@@ -183,6 +213,24 @@ func cloneSession(session *Session) *Session {
 
 	clone := *session
 	return &clone
+}
+
+func applyCreateInput(session *Session, input CreateSessionInput, now time.Time) {
+	if driverName := strings.TrimSpace(input.DriverName); driverName != "" {
+		session.DriverName = driverName
+	}
+	if driverPhoneMasked := strings.TrimSpace(input.DriverPhoneMasked); driverPhoneMasked != "" {
+		session.DriverPhoneMasked = driverPhoneMasked
+	}
+	if description := strings.TrimSpace(input.Description); description != "" {
+		session.Description = description
+	}
+	session.LocationStatus = defaultString(input.LocationStatus, session.LocationStatus)
+	session.NetworkStatus = defaultString(input.NetworkStatus, session.NetworkStatus)
+	if input.DriverOnline != nil {
+		session.DriverOnline = *input.DriverOnline
+	}
+	session.UpdatedAt = now
 }
 
 func defaultString(value string, fallback string) string {

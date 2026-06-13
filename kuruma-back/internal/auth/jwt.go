@@ -21,6 +21,8 @@ type JWTClaims struct {
 	IssuedAt  int64  `json:"iat"`
 }
 
+const JWTClaimsContextKey = "jwtClaims"
+
 var (
 	ErrInvalidToken = errors.New("invalid token")
 	ErrExpiredToken = errors.New("expired token")
