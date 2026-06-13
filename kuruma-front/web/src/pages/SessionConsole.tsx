@@ -486,10 +486,10 @@ function SessionConsole() {
                   <dt className="text-slate-500">电话</dt>
                   <dd className="font-medium">{activeSession?.driverPhoneMasked || '-'}</dd>
                 </div>
-                <div className="flex justify-between gap-4">
+                <div>
                   <dt className="text-slate-500">位置</dt>
-                  <dd className="font-medium text-emerald-700">
-                    {displayLocationStatus(activeSession?.locationStatus)}
+                  <dd className="mt-1 break-words font-medium leading-6 text-emerald-700">
+                    {displayLocationText(activeSession)}
                   </dd>
                 </div>
                 <div className="flex justify-between gap-4">
@@ -557,6 +557,10 @@ function SessionConsole() {
 
 function displayLocationStatus(status?: string) {
   return status === 'ready' ? '已获取' : '未获取'
+}
+
+function displayLocationText(session?: AccidentSession | null) {
+  return session?.locationText?.trim() || displayLocationStatus(session?.locationStatus)
 }
 
 function displayNetworkStatus(status?: string) {

@@ -6,6 +6,7 @@ export type AccidentSession = {
   driverPhoneMasked: string
   description: string
   locationStatus: string
+  locationText: string
   networkStatus: string
   driverOnline: boolean
   signalingStatus: string
@@ -62,6 +63,7 @@ export type CreateSessionInput = Partial<
     | 'driverPhoneMasked'
     | 'description'
     | 'locationStatus'
+    | 'locationText'
     | 'networkStatus'
     | 'driverOnline'
     | 'signalingStatus'

@@ -30,6 +30,7 @@ type Session struct {
 	DriverPhoneMasked string    `json:"driverPhoneMasked"`
 	Description       string    `json:"description"`
 	LocationStatus    string    `json:"locationStatus"`
+	LocationText      string    `json:"locationText"`
 	NetworkStatus     string    `json:"networkStatus"`
 	DriverOnline      bool      `json:"driverOnline"`
 	SignalingStatus   string    `json:"signalingStatus"`
@@ -45,6 +46,7 @@ type CreateSessionInput struct {
 	DriverPhoneMasked string
 	Description       string
 	LocationStatus    string
+	LocationText      string
 	NetworkStatus     string
 	DriverOnline      *bool
 	SignalingStatus   string
@@ -92,6 +94,7 @@ func (s *SessionService) Create(ctx context.Context, input CreateSessionInput) (
 		DriverPhoneMasked: driverPhoneMasked,
 		Description:       strings.TrimSpace(input.Description),
 		LocationStatus:    defaultString(input.LocationStatus, LocationStatusReady),
+		LocationText:      strings.TrimSpace(input.LocationText),
 		NetworkStatus:     defaultString(input.NetworkStatus, NetworkStatusGood),
 		DriverOnline:      driverOnline,
 		SignalingStatus:   defaultString(input.SignalingStatus, SignalingStatusIdle),
@@ -226,6 +229,9 @@ func applyCreateInput(session *Session, input CreateSessionInput, now time.Time)
 		session.Description = description
 	}
 	session.LocationStatus = defaultString(input.LocationStatus, session.LocationStatus)
+	if locationText := strings.TrimSpace(input.LocationText); locationText != "" {
+		session.LocationText = locationText
+	}
 	session.NetworkStatus = defaultString(input.NetworkStatus, session.NetworkStatus)
 	if input.DriverOnline != nil {
 		session.DriverOnline = *input.DriverOnline

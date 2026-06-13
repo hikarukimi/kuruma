@@ -31,6 +31,7 @@ type createSessionRequest struct {
 	DriverPhoneMasked string `json:"driverPhoneMasked"`
 	Description       string `json:"description"`
 	LocationStatus    string `json:"locationStatus"`
+	LocationText      string `json:"locationText"`
 	NetworkStatus     string `json:"networkStatus"`
 	DriverOnline      *bool  `json:"driverOnline"`
 	SignalingStatus   string `json:"signalingStatus"`
@@ -116,6 +117,7 @@ func (h *SessionHandler) Create(c *gin.Context) {
 		DriverPhoneMasked: req.DriverPhoneMasked,
 		Description:       req.Description,
 		LocationStatus:    req.LocationStatus,
+		LocationText:      req.LocationText,
 		NetworkStatus:     req.NetworkStatus,
 		DriverOnline:      req.DriverOnline,
 		SignalingStatus:   req.SignalingStatus,

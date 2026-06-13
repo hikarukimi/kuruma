@@ -62,6 +62,7 @@ export default function HomeRoute() {
   const [readiness, setReadiness] = useState<ReadinessState>(initialReadiness);
   const [session, setSession] = useState<AccidentSession | null>(null);
   const [description, setDescription] = useState('');
+  const [locationText, setLocationText] = useState('');
   const [submittingMode, setSubmittingMode] = useState<ConnectionMode | null>(null);
   const [activeMedia, setActiveMedia] = useState<ConnectionMode | null>(null);
   const [callStatus, setCallStatus] = useState('未连接');
@@ -142,6 +143,7 @@ export default function HomeRoute() {
 
   const checkReadiness = useCallback(async () => {
     setReadiness(initialReadiness);
+    setLocationText('');
 
     const [camera, microphone, locationPermission] = await Promise.all([
       Camera.getCameraPermissionsAsync(),
@@ -164,9 +166,10 @@ export default function HomeRoute() {
     }
 
     try {
-      await Location.getCurrentPositionAsync({
+      const currentLocation = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.Balanced,
       });
+      setLocationText(await resolveLocationText(currentLocation.coords));
       setReadiness((current) => ({
         ...current,
         location: 'ready',
@@ -198,6 +201,7 @@ export default function HomeRoute() {
           (await createSession({
             description,
             locationStatus: readiness.location === 'ready' ? 'ready' : 'unavailable',
+            locationText,
             networkStatus: readiness.network,
             recordingStatus: 'idle',
             signalingStatus: 'idle',
@@ -219,7 +223,7 @@ export default function HomeRoute() {
         setSubmittingMode(null);
       }
     },
-    [canStartConnection, description, isChecking, readiness, session, showMessage]
+    [canStartConnection, description, isChecking, locationText, readiness, session, showMessage]
   );
 
   const toggleActiveMedia = useCallback(() => {
@@ -746,4 +750,40 @@ function displayPeerConnectionState(state?: string) {
   }
 
   return '未连接';
+}
+
+async function resolveLocationText(coords: Location.LocationObjectCoords) {
+  const coordinateText = formatCoordinateText(coords);
+
+  try {
+    const [address] = await Location.reverseGeocodeAsync({
+      latitude: coords.latitude,
+      longitude: coords.longitude,
+    });
+    console.log('逆地理:',address);
+    const addressText = address ? formatAddressText(address) : '';
+    return addressText || coordinateText;
+  } catch {
+    return coordinateText;
+  }
+}
+
+function formatAddressText(address: Location.LocationGeocodedAddress) {
+  return [
+    address.country,
+    address.region,
+    address.city,
+    address.district,
+    address.street,
+    address.streetNumber,
+    address.name,
+  ]
+    .map((part) => part?.trim())
+    .filter(Boolean)
+    .filter((part, index, parts) => parts.indexOf(part) === index)
+    .join('');
+}
+
+function formatCoordinateText(coords: Location.LocationObjectCoords) {
+  return `纬度 ${coords.latitude.toFixed(6)}，经度 ${coords.longitude.toFixed(6)}`;
 }
