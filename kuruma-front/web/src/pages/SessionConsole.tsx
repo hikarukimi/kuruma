@@ -75,7 +75,7 @@ function SessionConsole() {
 
   // 监听可接入会话列表的实时变化，用来补充工作台里的会话入口。
   useEffect(() => {
-    const socket = connectAvailableSessionsRealtime(
+    const connection = connectAvailableSessionsRealtime(
       (nextSession) => {
         setAvailableSessions((currentSessions) => {
           if (currentSessions.some((currentSession) => currentSession.id === nextSession.id)) {
@@ -90,7 +90,7 @@ function SessionConsole() {
     )
 
     return () => {
-      socket.close()
+      connection.disconnect()
     }
   }, [showMessage])
 
@@ -106,6 +106,7 @@ function SessionConsole() {
 
     let ignore = false
     let socket: WebSocket | null = null
+    let realtimeDisconnect: (() => void) | null = null
     let peerConnection: RTCPeerConnection | null = null
     let videoRecorder: CallVideoRecorder | null = null
     let recordingUploadPromise: Promise<void> = Promise.resolve()
@@ -245,7 +246,7 @@ function SessionConsole() {
       }
     }
 
-    socket = connectSessionRealtime(
+    const realtimeConnection = connectSessionRealtime(
       activeSession.id,
       (nextSession) => {
         setSession(nextSession)
@@ -260,6 +261,8 @@ function SessionConsole() {
       },
       (message) => void handleSignal(message),
     )
+    socket = realtimeConnection.socket
+    realtimeDisconnect = realtimeConnection.disconnect
 
     // 获取本地摄像头和麦克风，并把媒体轨道挂到 PeerConnection 上。
     const setupCall = async () => {
@@ -340,7 +343,7 @@ function SessionConsole() {
       ignore = true
       sendRealtimeSignal(socket, 'webrtc.leave')
       void stopCallRecording()
-      socket?.close()
+      realtimeDisconnect?.()
       peerConnection?.close()
       localStreamRef.current?.getTracks().forEach((track) => track.stop())
       localStreamRef.current = null

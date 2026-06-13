@@ -56,7 +56,7 @@ function PoliceWorkbench() {
   }, [loadSessions])
 
   useEffect(() => {
-    const socket = connectAvailableSessionsRealtime(
+    const connection = connectAvailableSessionsRealtime(
       (nextSession) => {
         setSessions((currentSessions) => upsertSession(currentSessions, nextSession))
       },
@@ -66,7 +66,7 @@ function PoliceWorkbench() {
     )
 
     return () => {
-      socket.close()
+      connection.disconnect()
     }
   }, [showMessage])
 
@@ -102,7 +102,7 @@ function PoliceWorkbench() {
       return
     }
 
-    const socket = connectSessionRealtime(
+    const connection = connectSessionRealtime(
       selectedSession.id,
       (nextSession) => {
         setSessions((currentSessions) => upsertSession(currentSessions, nextSession))
@@ -113,7 +113,7 @@ function PoliceWorkbench() {
     )
 
     return () => {
-      socket.close()
+      connection.disconnect()
     }
   }, [selectedSession?.id, showMessage])
 

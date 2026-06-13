@@ -98,6 +98,11 @@ export type RealtimeSignalMessage = {
   payload?: unknown
 }
 
+export type RealtimeConnection = {
+  disconnect: () => void
+  socket: WebSocket
+}
+
 export async function listSessions() {
   const response = await fetch(`${apiBaseUrl}/sessions`, {
     headers: authHeader(),
@@ -241,6 +246,12 @@ export function connectSessionRealtime(
     token: getJwtToken(),
   })
   const socket = new WebSocket(`${wsBaseUrl}/ws?${params.toString()}`)
+  let hasOpened = false
+  let isManualClose = false
+
+  socket.onopen = () => {
+    hasOpened = true
+  }
 
   socket.onmessage = (event) => {
     const message = JSON.parse(event.data)
@@ -255,16 +266,20 @@ export function connectSessionRealtime(
   }
 
   socket.onerror = () => {
-    onError?.('实时状态连接异常')
+    if (!isManualClose) {
+      onError?.('实时状态连接异常')
+    }
   }
 
   socket.onclose = (event) => {
-    if (!event.wasClean) {
+    if (hasOpened && !isManualClose && !event.wasClean) {
       onError?.('实时状态连接已断开')
     }
   }
 
-  return socket
+  return createRealtimeConnection(socket, () => {
+    isManualClose = true
+  })
 }
 
 export function sendRealtimeSignal(socket: WebSocket | null, type: string, payload?: unknown) {
@@ -282,6 +297,12 @@ export function connectAvailableSessionsRealtime(
     token: getJwtToken(),
   })
   const socket = new WebSocket(`${wsBaseUrl}/ws/global?${params.toString()}`)
+  let hasOpened = false
+  let isManualClose = false
+
+  socket.onopen = () => {
+    hasOpened = true
+  }
 
   socket.onmessage = (event) => {
     const message = JSON.parse(event.data)
@@ -291,16 +312,30 @@ export function connectAvailableSessionsRealtime(
   }
 
   socket.onerror = () => {
-    onError?.('可接入会话连接异常')
+    if (!isManualClose) {
+      onError?.('可接入会话连接异常')
+    }
   }
 
   socket.onclose = (event) => {
-    if (!event.wasClean) {
+    if (hasOpened && !isManualClose && !event.wasClean) {
       onError?.('可接入会话连接已断开')
     }
   }
 
-  return socket
+  return createRealtimeConnection(socket, () => {
+    isManualClose = true
+  })
+}
+
+function createRealtimeConnection(socket: WebSocket, beforeDisconnect: () => void): RealtimeConnection {
+  return {
+    disconnect: () => {
+      beforeDisconnect()
+      socket.close()
+    },
+    socket,
+  }
 }
 
 async function updateSession(path: string, fallbackMessage: string) {
