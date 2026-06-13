@@ -71,11 +71,13 @@ export default function HomeRoute() {
   const { showMessage } = useMessage();
 
   const isChecking = readiness.location === 'checking' || readiness.media === 'checking';
+  const isCommunicating = Boolean(session) && session?.callStatus !== 'ended';
   const canStartConnection =
     !isChecking &&
     readiness.location === 'ready' &&
     readiness.media === 'ready' &&
     session?.callStatus !== 'ended' &&
+    !isCommunicating &&
     !submittingMode;
   const isCreatingSession = Boolean(submittingMode) && !session;
 
@@ -263,12 +265,25 @@ export default function HomeRoute() {
     let socket: WebSocket | null = null;
     let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
     let isActive = true;
+    let hasResetConnection = false;
     let localMediaStream: WebRTCMediaStream | null = null;
     const pendingRemoteCandidates: {
       candidate: string;
       sdpMLineIndex?: number | null;
       sdpMid?: string | null;
     }[] = [];
+
+    const resetConnection = (nextCallStatus: string) => {
+      if (hasResetConnection) {
+        return;
+      }
+
+      hasResetConnection = true;
+      setCallStatus(nextCallStatus);
+      setSession(null);
+      setLocalStream(null);
+      setRemoteStream(null);
+    };
 
     const addRemoteCandidate = async (candidate: {
       candidate: string;
@@ -325,7 +340,7 @@ export default function HomeRoute() {
         }
 
         if (message.type === 'webrtc.leave') {
-          setCallStatus('已断开');
+          resetConnection('已断开');
           return;
         }
 
@@ -403,7 +418,16 @@ export default function HomeRoute() {
       });
 
       peerConnectionEvents.addEventListener('connectionstatechange', () => {
-        setCallStatus(displayPeerConnectionState(peerConnection.connectionState));
+        const nextCallStatus = displayPeerConnectionState(peerConnection.connectionState);
+        setCallStatus(nextCallStatus);
+
+        if (
+          peerConnection.connectionState === 'disconnected' ||
+          peerConnection.connectionState === 'failed' ||
+          peerConnection.connectionState === 'closed'
+        ) {
+          resetConnection(nextCallStatus);
+        }
       });
     };
 
@@ -412,10 +436,16 @@ export default function HomeRoute() {
         connectDriverRealtime({
           sessionId: session.id,
           onSessionUpdated: (nextSession) => {
+            if (nextSession.callStatus === 'ended') {
+              resetConnection('已断开');
+              return;
+            }
+
             setSession(nextSession);
           },
           onError: (message) => {
             showMessage({ text: message, type: 'warning' });
+            resetConnection('连接失败');
           },
           onSignal: (message) => void handleSignal(message),
           onOpen: (openedSocket) => {
