@@ -24,7 +24,8 @@
       ],
       "@config-plugins/react-native-webrtc",
       "expo-dev-client",
-      "expo-router"
+      "expo-router",
+      "./plugins/add-security-config-plugin.js"
     ],
     "orientation": "portrait",
     "userInterfaceStyle": "light",
@@ -34,12 +35,32 @@
     "assetBundlePatterns": ["**/*"],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.kuruma.mobile"
+      "bundleIdentifier": "com.kuruma.mobile",
+      "bitcode": false
     },
     "android": {
+      "usesCleartextTraffic": true,
       "package": "com.kuruma.mobile",
       "adaptiveIcon": {
         "backgroundColor": "#ffffff"
+      },
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.INTERNET",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.WAKE_LOCK",
+        "android.permission.BLUETOOTH"
+      ]
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "616c0714-8d31-4b07-a30c-61107fc9b2ec"
       }
     }
   }

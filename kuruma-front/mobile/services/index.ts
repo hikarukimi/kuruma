@@ -2,11 +2,8 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { router } from 'expo-router';
 import { Platform } from 'react-native';
 
-const configuredApiBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL?.trim();
-const configuredWsBaseUrl = process.env.EXPO_PUBLIC_WS_BASE_URL?.trim();
-
-export const defaultApiBaseUrl = configuredApiBaseUrl || 'http://localhost:8080';
-export const defaultWsBaseUrl = configuredWsBaseUrl || defaultApiBaseUrl.replace(/^http/, 'ws');
+export const defaultApiBaseUrl = 'http://45.40.247.100:8080';
+export const defaultWsBaseUrl = 'ws://45.40.247.100:8080';
 
 let authToken = '';
 let isHandlingAuthExpired = false;
@@ -120,7 +117,9 @@ function isAuthTokenExpired(token: string) {
   try {
     const decodedPayload = JSON.parse(decodeBase64Url(payload)) as { exp?: number };
     const expiresAt = decodedPayload.exp;
-    return typeof expiresAt !== 'number' || !Number.isFinite(expiresAt) || Date.now() >= expiresAt * 1000;
+    return (
+      typeof expiresAt !== 'number' || !Number.isFinite(expiresAt) || Date.now() >= expiresAt * 1000
+    );
   } catch {
     return true;
   }

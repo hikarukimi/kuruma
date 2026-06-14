@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Camera } from 'expo-camera';
 import * as Location from 'expo-location';
 import { router } from 'expo-router';
 import {
@@ -17,6 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { RTCVideoView } from 'components/RTCVideoView';
 import { useMessage } from 'components/MessageProvider';
 import { clearAuthToken } from 'services';
+import { checkAppPermissions } from 'services/permissions';
 import {
   connectDriverRealtime,
   type RealtimeSignalMessage,
@@ -54,6 +54,8 @@ const initialReadiness: ReadinessState = {
 const rtcConfiguration = {
   iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
 };
+
+const readinessTimeoutMs = 1000;
 
 function getStatusStyle(isReady: boolean) {
   return isReady
@@ -98,11 +100,13 @@ export default function HomeRoute() {
               ? '定位已获取'
               : '定位未获取',
         ready: readiness.location === 'ready',
+        state: readiness.location,
       },
       {
         key: 'network',
         label: '网络正常',
         ready: readiness.network === 'ready',
+        state: readiness.network,
       },
       {
         key: 'media',
@@ -110,9 +114,10 @@ export default function HomeRoute() {
           readiness.media === 'checking'
             ? '摄像头/麦克风检查中'
             : readiness.media === 'ready'
-              ? '摄像头/麦克风可用'
+              ? '摄像头/麦克风已授权'
               : '摄像头/麦克风不可用',
         ready: readiness.media === 'ready',
+        state: readiness.media,
       },
     ],
     [readiness]
@@ -148,40 +153,36 @@ export default function HomeRoute() {
     setReadiness(initialReadiness);
     setLocationText('');
 
-    const [camera, microphone, locationPermission] = await Promise.all([
-      Camera.getCameraPermissionsAsync(),
-      Camera.getMicrophonePermissionsAsync(),
-      Location.getForegroundPermissionsAsync(),
-    ]);
+    const permissions = await checkAppPermissions();
+    const hasMediaPermissions = permissions.camera && permissions.microphone;
 
-    const mediaReady =
-      camera.granted && microphone.granted && Boolean(mediaDevices && RTCPeerConnection);
+    const mediaReady = hasMediaPermissions;
     setReadiness((current) => ({
       ...current,
       media: mediaReady ? 'ready' : 'failed',
     }));
 
-    if (!locationPermission.granted) {
+    if (!hasMediaPermissions || !permissions.location) {
       setReadiness((current) => ({
         ...current,
-        location: 'failed',
+        location: permissions.location ? current.location : 'failed',
       }));
+      router.replace('/premission');
       return;
     }
 
     try {
-      const currentLocation = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
+      const currentLocation = await getCurrentLocationWithFallback();
       setLocationText(await resolveLocationText(currentLocation.coords));
       setReadiness((current) => ({
         ...current,
         location: 'ready',
       }));
     } catch {
+      setLocationText('定位权限已授权，暂未获取精确位置');
       setReadiness((current) => ({
         ...current,
-        location: 'failed',
+        location: 'ready',
       }));
     }
   }, []);
@@ -193,6 +194,14 @@ export default function HomeRoute() {
           ? '正在检查现场状态，请稍后再试'
           : '请先确认定位和音视频权限可用，且当前通话未结束';
         showMessage({ text: message, type: 'error' });
+        return;
+      }
+
+      if (!mediaDevices || !RTCPeerConnection) {
+        showMessage({
+          text: '当前 Expo 预览环境不支持实时音视频，请使用 development build 运行',
+          type: 'warning',
+        });
         return;
       }
 
@@ -585,7 +594,7 @@ export default function HomeRoute() {
                     {item.ready ? '✓' : '!'}
                   </Text>
                   <Text className="text-base font-medium text-gray-800">{item.label}</Text>
-                  {item.key !== 'network' && !item.ready ? (
+                  {item.state === 'checking' ? (
                     <ActivityIndicator className="ml-auto" color="#d97706" size="small" />
                   ) : null}
                 </View>
@@ -770,6 +779,56 @@ async function resolveLocationText(coords: Location.LocationObjectCoords) {
   } catch {
     return coordinateText;
   }
+}
+
+async function getCurrentLocationWithFallback() {
+  const location = await withTimeout(
+    Location.getCurrentPositionAsync({
+      accuracy: Location.Accuracy.Balanced,
+    }),
+    readinessTimeoutMs
+  );
+  if (location) {
+    return location;
+  }
+
+  const lastKnownLocation = await withTimeout(
+    Location.getLastKnownPositionAsync({
+      maxAge: 5 * 60 * 1000,
+      requiredAccuracy: 1000,
+    }),
+    readinessTimeoutMs
+  );
+  if (lastKnownLocation) {
+    return lastKnownLocation;
+  }
+
+  const permission = await Location.requestForegroundPermissionsAsync();
+  if (!permission.granted) {
+    throw new Error('定位权限未授权');
+  }
+
+  const retriedLocation = await withTimeout(
+    Location.getCurrentPositionAsync({
+      accuracy: Location.Accuracy.Low,
+    }),
+    readinessTimeoutMs
+  );
+  if (!retriedLocation) {
+    throw new Error('定位获取超时');
+  }
+
+  return retriedLocation;
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T | null> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), timeoutMs);
+    promise
+      .then((value) => resolve(value))
+      .catch(() => resolve(null))
+      .finally(() => clearTimeout(timer));
+  });
 }
 
 function formatAddressText(address: Location.LocationGeocodedAddress) {

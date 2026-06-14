@@ -1,32 +1,16 @@
 import { useCallback, useEffect } from 'react';
-import { Camera } from 'expo-camera';
-import * as Location from 'expo-location';
 import { router } from 'expo-router';
 import { ActivityIndicator, Text, View } from 'react-native';
 import { loadValidAuthToken } from 'services';
+import { checkAppPermissions, type AppPermissions } from 'services/permissions';
 
-type PermissionState = {
-  camera: boolean;
-  microphone: boolean;
-  location: boolean;
-};
-
-function hasAllPermissions(permissions: PermissionState) {
+function hasAllPermissions(permissions: AppPermissions) {
   return permissions.camera && permissions.microphone && permissions.location;
 }
 
 export default function IndexRoute() {
   const checkStartupState = useCallback(async () => {
-    const [camera, microphone, location] = await Promise.all([
-      Camera.getCameraPermissionsAsync(),
-      Camera.getMicrophonePermissionsAsync(),
-      Location.getForegroundPermissionsAsync(),
-    ]);
-    const shouldGoToPermission = !hasAllPermissions({
-      camera: camera.granted,
-      microphone: microphone.granted,
-      location: location.granted,
-    });
+    const shouldGoToPermission = !hasAllPermissions(await checkAppPermissions());
     if (shouldGoToPermission) {
       router.replace('/premission');
       return;

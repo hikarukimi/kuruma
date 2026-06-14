@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Camera } from 'expo-camera';
-import * as Location from 'expo-location';
 import { router } from 'expo-router';
 import { Pressable, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { loadValidAuthToken } from 'services';
+import { checkAppPermissions, requestAppPermissions } from 'services/permissions';
 
 type PermissionKey = 'camera' | 'microphone' | 'location';
 type PermissionState = Record<PermissionKey, boolean>;
@@ -38,31 +37,13 @@ export default function PremissionRoute() {
   }, []);
 
   const checkPermissions = useCallback(async () => {
-    const [camera, microphone, location] = await Promise.all([
-      Camera.getCameraPermissionsAsync(),
-      Camera.getMicrophonePermissionsAsync(),
-      Location.getForegroundPermissionsAsync(),
-    ]);
-
-    void applyPermissions({
-      camera: camera.granted,
-      microphone: microphone.granted,
-      location: location.granted,
-    });
+    void applyPermissions(await checkAppPermissions());
   }, [applyPermissions]);
 
   const requestPermissions = useCallback(async () => {
     setIsRequesting(true);
     try {
-      const camera = await Camera.requestCameraPermissionsAsync();
-      const microphone = await Camera.requestMicrophonePermissionsAsync();
-      const location = await Location.requestForegroundPermissionsAsync();
-
-      await applyPermissions({
-        camera: camera.granted,
-        microphone: microphone.granted,
-        location: location.granted,
-      });
+      await applyPermissions(await requestAppPermissions());
     } finally {
       setIsRequesting(false);
     }
