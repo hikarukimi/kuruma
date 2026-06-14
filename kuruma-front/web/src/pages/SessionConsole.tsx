@@ -13,6 +13,11 @@ import {
   stopRecording,
   uploadRecording,
 } from '../sessions'
+import {
+  applyCallSenderQuality,
+  getCallMediaStream,
+  startWebRTCQualityLogging,
+} from '../webrtc-quality'
 
 const rtcConfiguration: RTCConfiguration = {
   iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
@@ -111,6 +116,7 @@ function SessionConsole() {
     let videoRecorder: CallVideoRecorder | null = null
     let recordingUploadPromise: Promise<void> = Promise.resolve()
     let hasReportedConnected = false
+    let stopQualityLogging: (() => void) | null = null
     const pendingRemoteCandidates: RTCIceCandidateInit[] = []
     const localVideoElement = localVideoRef.current
     const remoteVideoElement = remoteVideoRef.current
@@ -153,7 +159,6 @@ function SessionConsole() {
     const startCallRecording = async () => {
       if (
         videoRecorder ||
-        !localStreamRef.current ||
         !remoteMediaStream
       ) {
         return
@@ -165,7 +170,7 @@ function SessionConsole() {
       }
 
       try {
-        videoRecorder = await startVideoRecorder(localStreamRef.current, remoteMediaStream)
+        videoRecorder = await startVideoRecorder(remoteMediaStream)
 
         const nextSession = await startRecording(activeSession.id)
         if (!ignore) {
@@ -269,10 +274,7 @@ function SessionConsole() {
       try {
         setConnectionState('正在接入')
 
-        const localStream = await navigator.mediaDevices.getUserMedia({
-          audio: true,
-          video: true,
-        })
+        const localStream = await getCallMediaStream('video')
         if (ignore) {
           localStream.getTracks().forEach((track) => track.stop())
           return
@@ -281,16 +283,24 @@ function SessionConsole() {
         localStreamRef.current = localStream
         if (localVideoRef.current) {
           localVideoRef.current.srcObject = localStream
+          void playMediaElement(localVideoRef.current)
         }
 
         peerConnection = new RTCPeerConnection(rtcConfiguration)
-        localStream.getTracks().forEach((track) => peerConnection?.addTrack(track, localStream))
+        localStream.getTracks().forEach((track) => {
+          const sender = peerConnection?.addTrack(track, localStream)
+          if (sender) {
+            void applyCallSenderQuality(sender)
+          }
+        })
+        stopQualityLogging = startWebRTCQualityLogging(peerConnection, 'police')
 
         peerConnection.ontrack = (event) => {
           const [remoteStream] = event.streams
           if (remoteVideoRef.current && remoteStream) {
             remoteMediaStream = remoteStream
             remoteVideoRef.current.srcObject = remoteStream
+            void playMediaElement(remoteVideoRef.current)
             if (peerConnection?.connectionState === 'connected') {
               void startCallRecording()
             }
@@ -344,6 +354,7 @@ function SessionConsole() {
       sendRealtimeSignal(socket, 'webrtc.leave')
       void stopCallRecording()
       realtimeDisconnect?.()
+      stopQualityLogging?.()
       peerConnection?.close()
       localStreamRef.current?.getTracks().forEach((track) => track.stop())
       localStreamRef.current = null
@@ -450,6 +461,9 @@ function SessionConsole() {
               <video
                 autoPlay
                 className="absolute inset-0 h-full w-full object-cover"
+                onPause={(event) => void playMediaElement(event.currentTarget)}
+                onStalled={(event) => void playMediaElement(event.currentTarget)}
+                onWaiting={(event) => void playMediaElement(event.currentTarget)}
                 playsInline
                 ref={remoteVideoRef}
               />
@@ -605,7 +619,7 @@ type CallVideoRecorder = {
   stop: () => Promise<Blob>
 }
 
-async function startVideoRecorder(localStream: MediaStream, remoteStream: MediaStream): Promise<CallVideoRecorder> {
+async function startVideoRecorder(remoteStream: MediaStream): Promise<CallVideoRecorder> {
   if (!window.MediaRecorder) {
     throw new Error('当前浏览器不支持视频录制')
   }
@@ -616,40 +630,17 @@ async function startVideoRecorder(localStream: MediaStream, remoteStream: MediaS
   }
 
   const recordingStream = new MediaStream(videoTracks)
-  const AudioContextClass =
-    window.AudioContext ?? (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
-  const audioSources: MediaStreamAudioSourceNode[] = []
-  let audioContext: AudioContext | null = null
-
-  const audioTracks = [
-    ...remoteStream.getAudioTracks(),
-    ...localStream.getAudioTracks(),
-  ].filter((track) => track.readyState === 'live')
-
-  if (AudioContextClass && audioTracks.length > 0) {
-    audioContext = new AudioContextClass()
-    await audioContext.resume()
-
-    const destination = audioContext.createMediaStreamDestination()
-    const connectStream = (stream: MediaStream) => {
-      if (stream.getAudioTracks().some((track) => track.readyState === 'live')) {
-        const source = audioContext?.createMediaStreamSource(stream)
-        if (source) {
-          source.connect(destination)
-          audioSources.push(source)
-        }
-      }
-    }
-
-    connectStream(remoteStream)
-    connectStream(localStream)
-    destination.stream.getAudioTracks().forEach((track) => recordingStream.addTrack(track))
-  } else {
-    audioTracks.forEach((track) => recordingStream.addTrack(track))
-  }
+  remoteStream
+    .getAudioTracks()
+    .filter((track) => track.readyState === 'live')
+    .forEach((track) => recordingStream.addTrack(track))
 
   const mimeType = preferredVideoMimeType()
-  const recorder = new MediaRecorder(recordingStream, mimeType ? { mimeType } : undefined)
+  const recorder = new MediaRecorder(recordingStream, {
+    ...(mimeType ? { mimeType } : {}),
+    audioBitsPerSecond: 128_000,
+    videoBitsPerSecond: 2_500_000,
+  })
   const chunks: BlobPart[] = []
   const stopPromise = new Promise<Blob>((resolve, reject) => {
     recorder.ondataavailable = (event) => {
@@ -661,8 +652,6 @@ async function startVideoRecorder(localStream: MediaStream, remoteStream: MediaS
       reject((event as Event & { error?: Error }).error ?? new Error('视频录制失败'))
     }
     recorder.onstop = () => {
-      audioSources.forEach((source) => source.disconnect())
-      void audioContext?.close()
       resolve(new Blob(chunks, { type: recorder.mimeType || mimeType || 'video/webm' }))
     }
   })
@@ -679,10 +668,18 @@ async function startVideoRecorder(localStream: MediaStream, remoteStream: MediaS
   }
 }
 
+async function playMediaElement(element: HTMLMediaElement) {
+  try {
+    await element.play()
+  } catch {
+    // Autoplay can be rejected until the user interacts with the page.
+  }
+}
+
 function preferredVideoMimeType() {
   const supportedTypes = [
-    'video/webm;codecs=vp9,opus',
     'video/webm;codecs=vp8,opus',
+    'video/webm;codecs=vp9,opus',
     'video/webm',
   ]
 

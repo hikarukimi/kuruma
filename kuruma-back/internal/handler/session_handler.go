@@ -6,7 +6,6 @@ import (
 	"log"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -239,9 +238,6 @@ func (h *SessionHandler) UploadRecording(c *gin.Context) {
 	if err == nil {
 		h.broadcast(session)
 	}
-	if h.transcriber != nil {
-		h.transcriber.EnqueueRecording(recording)
-	}
 	c.JSON(http.StatusCreated, gin.H{"recording": recording, "session": session})
 }
 
@@ -328,14 +324,10 @@ func (h *SessionHandler) GetTranscript(c *gin.Context) {
 		return
 	}
 
-	if h.recordings != nil && h.transcriber != nil {
-		h.enqueueMissingTranscripts(c.Request.Context(), sessionID)
-	}
-
-	transcripts, err := h.transcripts.ListBySession(c.Request.Context(), sessionID)
+	recordingID := c.Query("recordingId")
+	transcripts, err := h.getTranscripts(c.Request.Context(), sessionID, recordingID)
 	if err != nil {
-		log.Printf("list transcripts for session %s: %v", sessionID, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "list transcripts failed"})
+		writeTranscriptError(c, err)
 		return
 	}
 
@@ -346,46 +338,44 @@ func (h *SessionHandler) GetTranscript(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"transcripts": response})
 }
 
-func (h *SessionHandler) enqueueMissingTranscripts(ctx context.Context, sessionID string) {
-	recordings, err := h.recordings.ListBySession(ctx, sessionID)
+func (h *SessionHandler) getTranscripts(ctx context.Context, sessionID string, recordingID string) ([]model.CallTranscript, error) {
+	if recordingID == "" {
+		return h.transcripts.ListBySession(ctx, sessionID)
+	}
+
+	transcript, err := h.transcripts.FindByRecording(ctx, sessionID, recordingID)
+	if err == nil {
+		return []model.CallTranscript{*transcript}, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+
+	if h.recordings == nil || h.transcriber == nil {
+		return nil, err
+	}
+
+	recording, err := h.recordings.FindForSession(ctx, sessionID, recordingID)
 	if err != nil {
-		log.Printf("list recordings for transcript session %s: %v", sessionID, err)
-		return
+		return nil, err
 	}
+	h.transcriber.EnqueueRecording(recording)
 
-	transcripts, err := h.transcripts.ListBySession(ctx, sessionID)
+	transcript, err = h.transcripts.FindByRecording(ctx, sessionID, recordingID)
 	if err != nil {
-		log.Printf("list transcripts before enqueue session %s: %v", sessionID, err)
-		return
+		return nil, err
 	}
-
-	transcribedRecordingIDs := make(map[string]struct{}, len(transcripts))
-	canExtractRecordingAudio := h.transcriber != nil && h.transcriber.CanExtractRecordingAudio()
-	for _, transcript := range transcripts {
-		if shouldRetryTranscript(transcript, canExtractRecordingAudio) {
-			continue
-		}
-		transcribedRecordingIDs[transcript.RecordingID] = struct{}{}
-	}
-
-	for i := range recordings {
-		if _, ok := transcribedRecordingIDs[recordings[i].ID]; ok {
-			continue
-		}
-		h.transcriber.EnqueueRecording(&recordings[i])
-	}
+	return []model.CallTranscript{*transcript}, nil
 }
 
-func shouldRetryTranscript(transcript model.CallTranscript, canExtractRecordingAudio bool) bool {
-	if transcript.Status != repository.TranscriptStatusFailed || transcript.ErrorMessage == nil {
-		return false
+func writeTranscriptError(c *gin.Context, err error) {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "recording or transcript not found"})
+		return
 	}
 
-	errorMessage := *transcript.ErrorMessage
-	if strings.Contains(errorMessage, "bigmodel asr only supports .wav/.mp3") {
-		return true
-	}
-	return canExtractRecordingAudio && strings.Contains(errorMessage, "ffmpeg is required to transcribe webm/mp4 recordings")
+	log.Printf("get transcripts for session %s: %v", c.Param("id"), err)
+	c.JSON(http.StatusInternalServerError, gin.H{"error": "list transcripts failed"})
 }
 
 func (h *SessionHandler) EndCall(c *gin.Context) {

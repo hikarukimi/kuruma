@@ -225,8 +225,13 @@ export async function fetchRecordingBlob(sessionId: string, recordingId: string)
   return response.blob()
 }
 
-export async function getSessionTranscript(sessionId: string) {
-  const response = await fetch(`${apiBaseUrl}/sessions/${sessionId}/transcript`, {
+export async function getSessionTranscript(sessionId: string, recordingId?: string) {
+  const params = new URLSearchParams()
+  if (recordingId) {
+    params.set('recordingId', recordingId)
+  }
+  const query = params.size > 0 ? `?${params.toString()}` : ''
+  const response = await fetch(`${apiBaseUrl}/sessions/${sessionId}/transcript${query}`, {
     headers: authHeader(),
   })
   await assertAuthorizedResponse(response)

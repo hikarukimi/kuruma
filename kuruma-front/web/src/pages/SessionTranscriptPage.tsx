@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
 import { useMessage } from '../components/message-context'
 import {
@@ -14,6 +14,8 @@ const transcriptPollingIntervalMs = 3000
 function SessionTranscriptPage() {
   const navigate = useNavigate()
   const { sessionId } = useParams()
+  const [searchParams] = useSearchParams()
+  const recordingId = searchParams.get('recordingId') ?? ''
   const [session, setSession] = useState<AccidentSession | null>(null)
   const [transcripts, setTranscripts] = useState<CallTranscript[]>([])
   const [isLoading, setIsLoading] = useState(Boolean(sessionId))
@@ -30,7 +32,7 @@ function SessionTranscriptPage() {
     let ignore = false
     const timer = window.setTimeout(() => {
       setIsLoading(true)
-      Promise.all([getSession(sessionId), getSessionTranscript(sessionId)])
+      Promise.all([getSession(sessionId), getSessionTranscript(sessionId, recordingId)])
         .then(([nextSession, nextTranscripts]) => {
           if (!ignore) {
             setSession(nextSession)
@@ -56,16 +58,16 @@ function SessionTranscriptPage() {
       ignore = true
       window.clearTimeout(timer)
     }
-  }, [sessionId, showMessage])
+  }, [recordingId, sessionId, showMessage])
 
   useEffect(() => {
-    if (!sessionId || !hasProcessingTranscript) {
+    if (!sessionId || !recordingId || !hasProcessingTranscript) {
       return undefined
     }
 
     let ignore = false
     const timer = window.setInterval(() => {
-      getSessionTranscript(sessionId)
+      getSessionTranscript(sessionId, recordingId)
         .then((nextTranscripts) => {
           if (!ignore) {
             setTranscripts(nextTranscripts)
@@ -85,7 +87,7 @@ function SessionTranscriptPage() {
       ignore = true
       window.clearInterval(timer)
     }
-  }, [hasProcessingTranscript, sessionId, showMessage])
+  }, [hasProcessingTranscript, recordingId, sessionId, showMessage])
 
   return (
     <main className="min-h-screen bg-[#f4f6f8] p-4 text-slate-900 md:p-8">
@@ -118,6 +120,7 @@ function SessionTranscriptPage() {
               )}
             />
             <InfoItem label="文本条数" value={String(segments.length)} />
+            <InfoItem label="录像记录" value={recordingId || '全部'} />
           </section>
 
           {segments.length > 0 ? (

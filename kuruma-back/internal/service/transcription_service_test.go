@@ -93,6 +93,20 @@ func TestBuildASRInputsSplitsLongWAVIntoThirtySecondChunks(t *testing.T) {
 	}
 }
 
+func TestBuildASRInputsSplitsPipeWAVWithUnknownChunkSizes(t *testing.T) {
+	wav := buildTestWAV(16000, 31*time.Second)
+	binary.LittleEndian.PutUint32(wav[4:8], 0xffffffff)
+	binary.LittleEndian.PutUint32(wav[40:44], 0xffffffff)
+
+	inputs, err := buildASRInputs(wav, "recording.wav", "audio/wav", 25*1024*1024)
+	if err != nil {
+		t.Fatalf("buildASRInputs returned error: %v", err)
+	}
+	if len(inputs) != 2 {
+		t.Fatalf("len(inputs) = %d, want 2", len(inputs))
+	}
+}
+
 func TestBuildASRInputsForRecordingExtractsWAVFromWebM(t *testing.T) {
 	webmData := []byte("fake webm bytes")
 	wav := buildTestWAV(16000, time.Second)

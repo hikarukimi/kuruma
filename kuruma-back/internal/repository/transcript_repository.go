@@ -37,14 +37,6 @@ func (r *TranscriptRepository) Start(ctx context.Context, recording model.Record
 		Where("recording_id = ?", strings.TrimSpace(recording.ID)).
 		First(&transcript).Error
 	if err == nil {
-		transcript.Status = TranscriptStatusProcessing
-		transcript.Provider = provider
-		transcript.Model = modelName
-		transcript.ErrorMessage = nil
-		transcript.CompletedAt = nil
-		if err := r.db.WithContext(ctx).Save(&transcript).Error; err != nil {
-			return nil, err
-		}
 		return &transcript, nil
 	}
 	if err != nil && err != gorm.ErrRecordNotFound {
@@ -63,6 +55,18 @@ func (r *TranscriptRepository) Start(ctx context.Context, recording model.Record
 		return nil, err
 	}
 
+	return &transcript, nil
+}
+
+func (r *TranscriptRepository) FindByRecording(ctx context.Context, sessionID string, recordingID string) (*model.CallTranscript, error) {
+	var transcript model.CallTranscript
+	err := r.db.WithContext(ctx).
+		Preload("Segments", orderTranscriptSegments).
+		Where("session_id = ? AND recording_id = ?", strings.TrimSpace(sessionID), strings.TrimSpace(recordingID)).
+		First(&transcript).Error
+	if err != nil {
+		return nil, err
+	}
 	return &transcript, nil
 }
 
@@ -131,11 +135,13 @@ func (r *TranscriptRepository) Fail(ctx context.Context, transcript *model.CallT
 func (r *TranscriptRepository) ListBySession(ctx context.Context, sessionID string) ([]model.CallTranscript, error) {
 	var transcripts []model.CallTranscript
 	err := r.db.WithContext(ctx).
-		Preload("Segments", func(db *gorm.DB) *gorm.DB {
-			return db.Order("chunk_index ASC, segment_index ASC, created_at ASC")
-		}).
+		Preload("Segments", orderTranscriptSegments).
 		Where("session_id = ?", strings.TrimSpace(sessionID)).
 		Order("created_at ASC").
 		Find(&transcripts).Error
 	return transcripts, err
+}
+
+func orderTranscriptSegments(db *gorm.DB) *gorm.DB {
+	return db.Order("chunk_index ASC, segment_index ASC, created_at ASC")
 }

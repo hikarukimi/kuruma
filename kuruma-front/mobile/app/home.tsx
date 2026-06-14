@@ -26,6 +26,9 @@ import {
 import { createSession, type AccidentSession } from 'services/sessions';
 import {
   mediaDevices,
+  applyCallSenderQuality,
+  getCallMediaStream,
+  startWebRTCQualityLogging,
   RTCIceCandidate,
   RTCPeerConnection,
   RTCSessionDescription,
@@ -151,7 +154,8 @@ export default function HomeRoute() {
       Location.getForegroundPermissionsAsync(),
     ]);
 
-    const mediaReady = camera.granted && microphone.granted && Boolean(mediaDevices && RTCPeerConnection);
+    const mediaReady =
+      camera.granted && microphone.granted && Boolean(mediaDevices && RTCPeerConnection);
     setReadiness((current) => ({
       ...current,
       media: mediaReady ? 'ready' : 'failed',
@@ -233,6 +237,11 @@ export default function HomeRoute() {
     }
 
     const nextMedia: ConnectionMode = activeMedia === 'video' ? 'audio' : 'video';
+    if (nextMedia === 'video' && localStream.getVideoTracks().length === 0) {
+      showMessage({ text: '仅语音连接未采集摄像头，请重新发起视频连接', type: 'warning' });
+      return;
+    }
+
     localStream.getVideoTracks().forEach((track) => {
       track.enabled = nextMedia === 'video';
     });
@@ -306,6 +315,7 @@ export default function HomeRoute() {
     let isActive = true;
     let hasResetConnection = false;
     let localMediaStream: WebRTCMediaStream | null = null;
+    let stopQualityLogging: (() => void) | null = null;
     const pendingRemoteCandidates: {
       candidate: string;
       sdpMLineIndex?: number | null;
@@ -409,15 +419,7 @@ export default function HomeRoute() {
         throw new Error('当前环境不支持 WebRTC');
       }
 
-      const mediaStream = (await mediaDevices.getUserMedia({
-        audio: true,
-        video: {
-          facingMode: 'environment',
-          frameRate: 24,
-          width: 1280,
-          height: 720,
-        },
-      })) as WebRTCMediaStream;
+      const mediaStream = await getCallMediaStream(activeMediaRef.current ?? 'video');
 
       if (!isActive) {
         mediaStream.getTracks().forEach((track) => track.stop());
@@ -444,11 +446,12 @@ export default function HomeRoute() {
       };
       peerConnectionRef.current = peerConnection;
       mediaStream.getTracks().forEach((track) => {
-        (peerConnection as { addTrack: (track: unknown, stream: unknown) => void }).addTrack(
-          track,
-          mediaStream
-        );
+        const sender = (
+          peerConnection as { addTrack: (track: unknown, stream: unknown) => unknown }
+        ).addTrack(track, mediaStream);
+        void applyCallSenderQuality(sender);
       });
+      stopQualityLogging = startWebRTCQualityLogging(peerConnection, 'driver');
 
       peerConnectionEvents.addEventListener('track', (event) => {
         const [nextRemoteStream] = event.streams ?? [];
@@ -529,6 +532,7 @@ export default function HomeRoute() {
       sendRealtimeSignal(socket, 'webrtc.leave');
       socket?.close();
       socketRef.current = null;
+      stopQualityLogging?.();
       peerConnectionRef.current?.close();
       peerConnectionRef.current = null;
       localMediaStream?.getTracks().forEach((track) => track.stop());
@@ -632,7 +636,7 @@ export default function HomeRoute() {
                   </Text>
                 </View>
                 {remoteStream ? (
-                  <View className="absolute right-3 bottom-3 h-28 w-20 overflow-hidden rounded-md border border-white/30 bg-black">
+                  <View className="absolute bottom-3 right-3 h-28 w-20 overflow-hidden rounded-md border border-white/30 bg-black">
                     <RTCVideoView
                       objectFit="cover"
                       stream={remoteStream}
@@ -760,7 +764,7 @@ async function resolveLocationText(coords: Location.LocationObjectCoords) {
       latitude: coords.latitude,
       longitude: coords.longitude,
     });
-    console.log('逆地理:',address);
+    console.log('逆地理:', address);
     const addressText = address ? formatAddressText(address) : '';
     return addressText || coordinateText;
   } catch {

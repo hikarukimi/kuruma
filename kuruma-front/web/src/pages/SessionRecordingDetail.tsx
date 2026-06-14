@@ -196,7 +196,11 @@ function SessionRecordingDetail() {
               </button>
               <button
                 className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
-                onClick={() => navigate(`/sessions/${sessionId}/transcript`)}
+                disabled={!selectedRecording}
+                onClick={() =>
+                  selectedRecording &&
+                  navigate(`/sessions/${sessionId}/transcript?recordingId=${selectedRecording.id}`)
+                }
                 type="button"
               >
                 读取通话文本

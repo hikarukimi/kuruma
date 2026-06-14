@@ -506,9 +506,13 @@ func parseWAVPCM(data []byte) (wavPCMInfo, bool) {
 	var foundData bool
 	for offset := 12; offset+8 <= len(data); {
 		chunkID := string(data[offset : offset+4])
-		chunkSize := int(binary.LittleEndian.Uint32(data[offset+4 : offset+8]))
+		rawChunkSize := binary.LittleEndian.Uint32(data[offset+4 : offset+8])
+		chunkSize := int(rawChunkSize)
 		chunkStart := offset + 8
 		chunkEnd := chunkStart + chunkSize
+		if rawChunkSize == 0xffffffff {
+			chunkEnd = len(data)
+		}
 		if chunkSize < 0 || chunkEnd > len(data) {
 			return wavPCMInfo{}, false
 		}
