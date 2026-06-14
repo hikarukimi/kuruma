@@ -58,8 +58,14 @@ func (s *TranscriptionService) EnqueueRecording(recording *model.Recording) {
 	}
 
 	recordingCopy := *recording
+	transcript, err := s.transcripts.Start(context.Background(), recordingCopy, transcriptionProviderBigModel, s.client.Model())
+	if err != nil {
+		log.Printf("start transcript for recording %s session %s: %v", recordingCopy.ID, recordingCopy.SessionID, err)
+		return
+	}
+
 	go func() {
-		if err := s.TranscribeRecording(context.Background(), recordingCopy); err != nil {
+		if err := s.completeTranscript(context.Background(), transcript, recordingCopy); err != nil {
 			log.Printf("transcribe recording %s for session %s: %v", recordingCopy.ID, recordingCopy.SessionID, err)
 		}
 	}()
@@ -71,6 +77,10 @@ func (s *TranscriptionService) TranscribeRecording(ctx context.Context, recordin
 		return err
 	}
 
+	return s.completeTranscript(ctx, transcript, recording)
+}
+
+func (s *TranscriptionService) completeTranscript(ctx context.Context, transcript *model.CallTranscript, recording model.Recording) error {
 	lines, err := s.transcribeRecording(ctx, recording)
 	if err != nil {
 		_ = s.transcripts.Fail(ctx, transcript, err.Error())

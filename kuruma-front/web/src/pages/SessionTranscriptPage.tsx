@@ -4,68 +4,23 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { useMessage } from '../components/message-context'
 import {
   type AccidentSession,
+  type CallTranscript,
   getSession,
+  getSessionTranscript,
 } from '../sessions'
 
-const mockTranscriptSegments = [
-  {
-    id: 'mock-driver-report',
-    speaker: '说话人1',
-    content: '我所在的虹梅路发生车祸了，需要处理。',
-  },
-  {
-    id: 'mock-police-reply',
-    speaker: '说话人2',
-    content: '收到。请问有人员受伤吗？',
-  },
-  {
-    id: 'mock-driver-injury',
-    speaker: '说话人1',
-    content: '有两个人受了轻伤，我已经叫了救护车。',
-  },
-  {
-    id: 'mock-police-ask-location',
-    speaker: '说话人2',
-    content: '请提供具体的事故地点，我这边帮您记录。',
-  },
-  {
-    id: 'mock-driver-location',
-    speaker: '说话人1',
-    content: '虹梅路地铁站2号口，南向北方向。',
-  },
-  {
-    id: 'mock-police-ask-vehicle',
-    speaker: '说话人2',
-    content: '涉及几辆车？车牌号方便提供吗？',
-  },
-  {
-    id: 'mock-driver-vehicle',
-    speaker: '说话人1',
-    content: '三辆车连环追尾，我的车牌是沪A12345。',
-  },
-  {
-    id: 'mock-police-response',
-    speaker: '说话人2',
-    content: '好的，已为您记录报案信息。交警会尽快赶往现场，请保持电话畅通。',
-  },
-  {
-    id: 'mock-driver-confirm',
-    speaker: '说话人1',
-    content: '好的，谢谢。',
-  },
-  {
-    id: 'mock-police-closing',
-    speaker: '说话人2',
-    content: '不客气，请注意自身安全，避免二次事故。',
-  },
-]
+const transcriptPollingIntervalMs = 3000
 
 function SessionTranscriptPage() {
   const navigate = useNavigate()
   const { sessionId } = useParams()
   const [session, setSession] = useState<AccidentSession | null>(null)
+  const [transcripts, setTranscripts] = useState<CallTranscript[]>([])
   const [isLoading, setIsLoading] = useState(Boolean(sessionId))
   const { showMessage } = useMessage()
+  const segments = transcripts.flatMap((transcript) => transcript.segments)
+  const hasProcessingTranscript = transcripts.some((transcript) => transcript.status === 'processing')
+  const hasFailedTranscript = transcripts.some((transcript) => transcript.status === 'failed')
 
   useEffect(() => {
     if (!sessionId) {
@@ -75,10 +30,11 @@ function SessionTranscriptPage() {
     let ignore = false
     const timer = window.setTimeout(() => {
       setIsLoading(true)
-      getSession(sessionId)
-        .then((nextSession) => {
+      Promise.all([getSession(sessionId), getSessionTranscript(sessionId)])
+        .then(([nextSession, nextTranscripts]) => {
           if (!ignore) {
             setSession(nextSession)
+            setTranscripts(nextTranscripts)
           }
         })
         .catch((error) => {
@@ -102,6 +58,35 @@ function SessionTranscriptPage() {
     }
   }, [sessionId, showMessage])
 
+  useEffect(() => {
+    if (!sessionId || !hasProcessingTranscript) {
+      return undefined
+    }
+
+    let ignore = false
+    const timer = window.setInterval(() => {
+      getSessionTranscript(sessionId)
+        .then((nextTranscripts) => {
+          if (!ignore) {
+            setTranscripts(nextTranscripts)
+          }
+        })
+        .catch((error) => {
+          if (!ignore) {
+            showMessage({
+              text: error instanceof Error ? error.message : '获取通话文本失败',
+              type: 'error',
+            })
+          }
+        })
+    }, transcriptPollingIntervalMs)
+
+    return () => {
+      ignore = true
+      window.clearInterval(timer)
+    }
+  }, [hasProcessingTranscript, sessionId, showMessage])
+
   return (
     <main className="min-h-screen bg-[#f4f6f8] p-4 text-slate-900 md:p-8">
       <section className="mx-auto min-h-[calc(100vh-2rem)] max-w-5xl rounded-lg border border-slate-200 bg-white shadow-sm md:min-h-[calc(100vh-4rem)]">
@@ -123,13 +108,21 @@ function SessionTranscriptPage() {
           <section className="mb-5 grid gap-3 border-b border-slate-200 pb-5 text-sm md:grid-cols-2">
             <InfoItem label="司机" value={session?.driverName || '-'} />
             <InfoItem label="电话" value={session?.driverPhoneMasked || '-'} />
-            <InfoItem label="生成状态" value={isLoading ? '读取中' : ''} />
-            <InfoItem label="文本条数" value={String(mockTranscriptSegments.length)} />
+            <InfoItem
+              label="生成状态"
+              value={displayTranscriptStatus(
+                isLoading,
+                transcripts.length,
+                hasProcessingTranscript,
+                hasFailedTranscript
+              )}
+            />
+            <InfoItem label="文本条数" value={String(segments.length)} />
           </section>
 
-          {mockTranscriptSegments.length > 0 ? (
+          {segments.length > 0 ? (
             <section className="grid gap-4">
-              {mockTranscriptSegments.map((segment) => (
+              {segments.map((segment) => (
                 <article className="border-b border-slate-100 pb-4" key={segment.id}>
                   <div className="mb-2 text-sm font-semibold text-emerald-700">{segment.speaker}</div>
                   <p className="text-base leading-8 text-slate-800">{segment.content}</p>
@@ -138,13 +131,47 @@ function SessionTranscriptPage() {
             </section>
           ) : (
             <section className="rounded-lg border border-slate-200 bg-slate-50 p-8 text-center text-sm font-medium text-slate-500">
-              {isLoading ? '正在读取通话文本...' : '暂无通话文本。'}
+              {displayEmptyText(isLoading, hasProcessingTranscript, hasFailedTranscript)}
             </section>
           )}
         </div>
       </section>
     </main>
   )
+}
+
+function displayTranscriptStatus(
+  isLoading: boolean,
+  transcriptCount: number,
+  hasProcessingTranscript: boolean,
+  hasFailedTranscript: boolean
+) {
+  if (isLoading) {
+    return '读取中'
+  }
+  if (hasProcessingTranscript) {
+    return '生成中'
+  }
+  if (hasFailedTranscript) {
+    return '生成失败'
+  }
+  if (transcriptCount === 0) {
+    return '暂无文本'
+  }
+  return '已完成'
+}
+
+function displayEmptyText(isLoading: boolean, hasProcessingTranscript: boolean, hasFailedTranscript: boolean) {
+  if (isLoading) {
+    return '正在读取通话文本...'
+  }
+  if (hasProcessingTranscript) {
+    return '正在生成通话文本...'
+  }
+  if (hasFailedTranscript) {
+    return '通话文本生成失败。'
+  }
+  return '暂无通话文本。'
 }
 
 function InfoItem({ label, value }: { label: string; value: string }) {

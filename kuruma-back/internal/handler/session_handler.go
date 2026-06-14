@@ -238,10 +238,6 @@ func (h *SessionHandler) UploadRecording(c *gin.Context) {
 	if err == nil {
 		h.broadcast(session)
 	}
-	if h.transcriber != nil {
-		h.transcriber.EnqueueRecording(recording)
-	}
-
 	c.JSON(http.StatusCreated, gin.H{"recording": recording, "session": session})
 }
 
@@ -328,6 +324,10 @@ func (h *SessionHandler) GetTranscript(c *gin.Context) {
 		return
 	}
 
+	if h.recordings != nil && h.transcriber != nil {
+		h.enqueueMissingTranscripts(c.Request.Context(), sessionID)
+	}
+
 	transcripts, err := h.transcripts.ListBySession(c.Request.Context(), sessionID)
 	if err != nil {
 		log.Printf("list transcripts for session %s: %v", sessionID, err)
@@ -340,6 +340,32 @@ func (h *SessionHandler) GetTranscript(c *gin.Context) {
 		response = append(response, buildTranscriptResponse(&transcripts[i]))
 	}
 	c.JSON(http.StatusOK, gin.H{"transcripts": response})
+}
+
+func (h *SessionHandler) enqueueMissingTranscripts(ctx context.Context, sessionID string) {
+	recordings, err := h.recordings.ListBySession(ctx, sessionID)
+	if err != nil {
+		log.Printf("list recordings for transcript session %s: %v", sessionID, err)
+		return
+	}
+
+	transcripts, err := h.transcripts.ListBySession(ctx, sessionID)
+	if err != nil {
+		log.Printf("list transcripts before enqueue session %s: %v", sessionID, err)
+		return
+	}
+
+	transcribedRecordingIDs := make(map[string]struct{}, len(transcripts))
+	for _, transcript := range transcripts {
+		transcribedRecordingIDs[transcript.RecordingID] = struct{}{}
+	}
+
+	for i := range recordings {
+		if _, ok := transcribedRecordingIDs[recordings[i].ID]; ok {
+			continue
+		}
+		h.transcriber.EnqueueRecording(&recordings[i])
+	}
 }
 
 func (h *SessionHandler) EndCall(c *gin.Context) {
