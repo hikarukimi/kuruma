@@ -21,6 +21,7 @@ type Config struct {
 	JWTSecret          string
 	JWTExpiresHours    int
 	StorageLocalPath   string
+	FFmpegPath         string
 	BigModelAPIKey     string
 	BigModelEndpoint   string
 	BigModelModel      string
@@ -79,6 +80,9 @@ func loadFile(path string) (Config, error) {
 		Storage struct {
 			LocalPath string `yaml:"local_path"`
 		} `yaml:"storage"`
+		Transcription struct {
+			FFmpegPath string `yaml:"ffmpeg_path"`
+		} `yaml:"transcription"`
 		BigModel struct {
 			APIKey     string `yaml:"api_key"`
 			Endpoint   string `yaml:"endpoint"`
@@ -114,6 +118,9 @@ func loadFile(path string) (Config, error) {
 	}
 	if fileConfig.Storage.LocalPath != "" {
 		cfg.StorageLocalPath = fileConfig.Storage.LocalPath
+	}
+	if fileConfig.Transcription.FFmpegPath != "" {
+		cfg.FFmpegPath = fileConfig.Transcription.FFmpegPath
 	}
 	if fileConfig.BigModel.APIKey != "" {
 		cfg.BigModelAPIKey = fileConfig.BigModel.APIKey

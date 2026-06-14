@@ -12,6 +12,7 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/http"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -31,6 +32,7 @@ type TranscriptionService struct {
 	recordings    *repository.RecordingRepository
 	transcripts   *repository.TranscriptRepository
 	maxAudioBytes int64
+	ffmpegPath    string
 }
 
 type TranscriptLine struct {
@@ -49,6 +51,7 @@ func NewTranscriptionService(cfg config.Config, recordings *repository.Recording
 		recordings:    recordings,
 		transcripts:   transcripts,
 		maxAudioBytes: maxAudioBytes,
+		ffmpegPath:    strings.TrimSpace(cfg.FFmpegPath),
 	}
 }
 
@@ -126,7 +129,7 @@ func (s *TranscriptionService) transcribeRecording(ctx context.Context, recordin
 	}
 
 	mimeType := normalizeAudioMimeType(recording.MimeType, recording.FilePath)
-	inputs, err := buildASRInputs(data, fileName, mimeType, s.maxAudioBytes)
+	inputs, err := s.buildASRInputsForRecording(ctx, data, fileName, mimeType)
 	if err != nil {
 		return nil, err
 	}
@@ -149,11 +152,31 @@ func (s *TranscriptionService) transcribeRecording(ctx context.Context, recordin
 	return results, nil
 }
 
+func (s *TranscriptionService) buildASRInputsForRecording(ctx context.Context, data []byte, fileName string, mimeType string) ([]AudioTranscriptionInput, error) {
+	return buildASRInputsForRecording(data, fileName, mimeType, s.maxAudioBytes, func(data []byte, fileName string, mimeType string) ([]byte, error) {
+		return s.extractWAVWithFFmpeg(ctx, data)
+	})
+}
+
+func (s *TranscriptionService) CanExtractRecordingAudio() bool {
+	if s == nil {
+		return false
+	}
+	ffmpegPath := strings.TrimSpace(s.ffmpegPath)
+	if ffmpegPath == "" {
+		ffmpegPath = "ffmpeg"
+	}
+	_, err := exec.LookPath(ffmpegPath)
+	return err == nil
+}
+
 type AudioTranscriptionInput struct {
 	Data     []byte
 	FileName string
 	MimeType string
 }
+
+type recordingAudioExtractor func(data []byte, fileName string, mimeType string) ([]byte, error)
 
 type BigModelClient struct {
 	apiKey   string
@@ -310,6 +333,86 @@ func buildASRInputs(data []byte, fileName string, mimeType string, maxBytes int6
 		})
 	}
 	return inputs, nil
+}
+
+func buildASRInputsForRecording(data []byte, fileName string, mimeType string, maxBytes int64, extract recordingAudioExtractor) ([]AudioTranscriptionInput, error) {
+	if shouldExtractRecordingAudio(fileName, mimeType) {
+		if extract == nil {
+			return nil, errors.New("ffmpeg is required to transcribe webm/mp4 recordings")
+		}
+
+		wav, err := extract(data, fileName, mimeType)
+		if err != nil {
+			return nil, err
+		}
+		fileName = strings.TrimSuffix(fileName, filepath.Ext(fileName)) + ".wav"
+		if strings.TrimSpace(fileName) == ".wav" {
+			fileName = "recording.wav"
+		}
+		return buildASRInputs(wav, fileName, "audio/wav", maxBytes)
+	}
+
+	return buildASRInputs(data, fileName, mimeType, maxBytes)
+}
+
+func shouldExtractRecordingAudio(fileName string, mimeType string) bool {
+	extension := strings.ToLower(filepath.Ext(fileName))
+	mimeType = strings.ToLower(strings.TrimSpace(mimeType))
+	switch extension {
+	case ".wav", ".mp3":
+		return false
+	case ".webm", ".mp4", ".m4a", ".mov", ".ogg":
+		return true
+	}
+
+	switch {
+	case strings.Contains(mimeType, "webm"),
+		strings.Contains(mimeType, "mp4"),
+		strings.Contains(mimeType, "m4a"),
+		strings.Contains(mimeType, "quicktime"),
+		strings.Contains(mimeType, "ogg"):
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *TranscriptionService) extractWAVWithFFmpeg(ctx context.Context, data []byte) ([]byte, error) {
+	ffmpegPath := strings.TrimSpace(s.ffmpegPath)
+	if ffmpegPath == "" {
+		ffmpegPath = "ffmpeg"
+	}
+
+	cmd := exec.CommandContext(ctx, ffmpegPath,
+		"-hide_banner",
+		"-loglevel", "error",
+		"-i", "pipe:0",
+		"-vn",
+		"-ac", "1",
+		"-ar", "16000",
+		"-f", "wav",
+		"pipe:1",
+	)
+	cmd.Stdin = bytes.NewReader(data)
+	var output bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &output
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		if errors.Is(err, exec.ErrNotFound) {
+			return nil, errors.New("ffmpeg is required to transcribe webm/mp4 recordings")
+		}
+		message := strings.TrimSpace(stderr.String())
+		if message == "" {
+			message = err.Error()
+		}
+		return nil, fmt.Errorf("extract recording audio with ffmpeg: %s", message)
+	}
+	if output.Len() == 0 {
+		return nil, errors.New("ffmpeg extracted empty audio")
+	}
+	return output.Bytes(), nil
 }
 
 func normalizeAudioMimeType(mimeType string, filePath string) string {

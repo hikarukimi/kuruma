@@ -120,7 +120,7 @@ function isAuthTokenExpired(token: string) {
   try {
     const decodedPayload = JSON.parse(decodeBase64Url(payload)) as { exp?: number };
     const expiresAt = decodedPayload.exp;
-    return !Number.isFinite(expiresAt) || Date.now() >= expiresAt * 1000;
+    return typeof expiresAt !== 'number' || !Number.isFinite(expiresAt) || Date.now() >= expiresAt * 1000;
   } catch {
     return true;
   }

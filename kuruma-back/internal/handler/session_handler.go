@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -238,6 +239,9 @@ func (h *SessionHandler) UploadRecording(c *gin.Context) {
 	if err == nil {
 		h.broadcast(session)
 	}
+	if h.transcriber != nil {
+		h.transcriber.EnqueueRecording(recording)
+	}
 	c.JSON(http.StatusCreated, gin.H{"recording": recording, "session": session})
 }
 
@@ -356,7 +360,11 @@ func (h *SessionHandler) enqueueMissingTranscripts(ctx context.Context, sessionI
 	}
 
 	transcribedRecordingIDs := make(map[string]struct{}, len(transcripts))
+	canExtractRecordingAudio := h.transcriber != nil && h.transcriber.CanExtractRecordingAudio()
 	for _, transcript := range transcripts {
+		if shouldRetryTranscript(transcript, canExtractRecordingAudio) {
+			continue
+		}
 		transcribedRecordingIDs[transcript.RecordingID] = struct{}{}
 	}
 
@@ -366,6 +374,18 @@ func (h *SessionHandler) enqueueMissingTranscripts(ctx context.Context, sessionI
 		}
 		h.transcriber.EnqueueRecording(&recordings[i])
 	}
+}
+
+func shouldRetryTranscript(transcript model.CallTranscript, canExtractRecordingAudio bool) bool {
+	if transcript.Status != repository.TranscriptStatusFailed || transcript.ErrorMessage == nil {
+		return false
+	}
+
+	errorMessage := *transcript.ErrorMessage
+	if strings.Contains(errorMessage, "bigmodel asr only supports .wav/.mp3") {
+		return true
+	}
+	return canExtractRecordingAudio && strings.Contains(errorMessage, "ffmpeg is required to transcribe webm/mp4 recordings")
 }
 
 func (h *SessionHandler) EndCall(c *gin.Context) {

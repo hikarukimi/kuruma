@@ -8,9 +8,20 @@ import type {
 
 type NativeWebRTC = typeof import('react-native-webrtc');
 
-const nativeWebRTC =
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  Platform.OS === 'web' ? null : (require('react-native-webrtc') as NativeWebRTC);
+function getNativeWebRTC() {
+  if (Platform.OS === 'web') {
+    return null;
+  }
+
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require('react-native-webrtc') as NativeWebRTC;
+  } catch {
+    return null;
+  }
+}
+
+const nativeWebRTC = getNativeWebRTC();
 
 export type WebRTCMediaStream = NativeMediaStream | globalThis.MediaStream;
 export type WebRTCPeerConnection = NativeRTCPeerConnection | globalThis.RTCPeerConnection;

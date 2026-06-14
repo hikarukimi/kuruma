@@ -151,7 +151,7 @@ export default function HomeRoute() {
       Location.getForegroundPermissionsAsync(),
     ]);
 
-    const mediaReady = camera.granted && microphone.granted;
+    const mediaReady = camera.granted && microphone.granted && Boolean(mediaDevices && RTCPeerConnection);
     setReadiness((current) => ({
       ...current,
       media: mediaReady ? 'ready' : 'failed',

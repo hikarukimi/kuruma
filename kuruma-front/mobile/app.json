@@ -2,10 +2,9 @@
   "expo": {
     "name": "mobile",
     "slug": "mobile",
+    "scheme": "kuruma",
     "version": "1.0.0",
-    "web": {
-      "favicon": "./assets/favicon.png"
-    },
+    "web": {},
     "experiments": {
       "tsconfigPaths": true
     },
@@ -28,11 +27,8 @@
       "expo-router"
     ],
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "splash": {
-      "image": "./assets/splash.png",
-      "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
     "assetBundlePatterns": ["**/*"],
@@ -43,7 +39,6 @@
     "android": {
       "package": "com.kuruma.mobile",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       }
     }

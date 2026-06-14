@@ -93,6 +93,42 @@ func TestBuildASRInputsSplitsLongWAVIntoThirtySecondChunks(t *testing.T) {
 	}
 }
 
+func TestBuildASRInputsForRecordingExtractsWAVFromWebM(t *testing.T) {
+	webmData := []byte("fake webm bytes")
+	wav := buildTestWAV(16000, time.Second)
+	var extractedName string
+	var extractedMimeType string
+	var extractedData []byte
+
+	inputs, err := buildASRInputsForRecording(webmData, "recording.webm", "video/webm;codecs=vp9,opus", 25*1024*1024, func(data []byte, fileName string, mimeType string) ([]byte, error) {
+		extractedData = data
+		extractedName = fileName
+		extractedMimeType = mimeType
+		return wav, nil
+	})
+	if err != nil {
+		t.Fatalf("buildASRInputsForRecording returned error: %v", err)
+	}
+	if string(extractedData) != string(webmData) {
+		t.Fatalf("extracted data = %q, want %q", string(extractedData), string(webmData))
+	}
+	if extractedName != "recording.webm" {
+		t.Fatalf("extracted file name = %q, want recording.webm", extractedName)
+	}
+	if extractedMimeType != "video/webm;codecs=vp9,opus" {
+		t.Fatalf("extracted mime type = %q, want video/webm;codecs=vp9,opus", extractedMimeType)
+	}
+	if len(inputs) != 1 {
+		t.Fatalf("len(inputs) = %d, want 1", len(inputs))
+	}
+	if inputs[0].FileName != "recording.wav" {
+		t.Fatalf("file name = %q, want recording.wav", inputs[0].FileName)
+	}
+	if inputs[0].MimeType != "audio/wav" {
+		t.Fatalf("mime type = %q, want audio/wav", inputs[0].MimeType)
+	}
+}
+
 func buildTestWAV(sampleRate int, duration time.Duration) []byte {
 	pcmBytes := int(duration.Seconds() * float64(sampleRate) * 2)
 	info := wavPCMInfo{
