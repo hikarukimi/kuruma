@@ -5,6 +5,8 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "start": "expo start",
+    "start:dev": "node scripts/start-expo-env.js development",
+    "start:prod": "node scripts/start-expo-env.js production",
     "prebuild": "expo prebuild",
     "lint": "eslint \"**/*.{js,jsx,ts,tsx}\" && prettier -c \"**/*.{js,jsx,ts,tsx,json}\"",
     "format": "eslint \"**/*.{js,jsx,ts,tsx}\" --fix && prettier \"**/*.{js,jsx,ts,tsx,json}\" --write",

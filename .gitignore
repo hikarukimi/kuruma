@@ -28,6 +28,10 @@ npm-debug.*
 *.local
 .env
 .env.*
+!kuruma-front/web/.env.development
+!kuruma-front/web/.env.production
+!kuruma-front/mobile/.env.development
+!kuruma-front/mobile/.env.production
 
 # Mobile signing and provisioning secrets
 *.jks

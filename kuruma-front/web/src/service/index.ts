@@ -1,5 +1,8 @@
-export const apiBaseUrl = 'http://localhost:8080/api/v1'
-export const wsBaseUrl = 'ws://localhost:8080/api/v1'
+const configuredApiBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim()
+const configuredWsBaseUrl = import.meta.env.VITE_WS_BASE_URL?.trim()
+
+export const apiBaseUrl = configuredApiBaseUrl || 'http://localhost:8080/api/v1'
+export const wsBaseUrl = configuredWsBaseUrl || apiBaseUrl.replace(/^http/, 'ws')
 const authTokenStorageKey = 'kuruma.authToken'
 
 let jwtToken = ''
